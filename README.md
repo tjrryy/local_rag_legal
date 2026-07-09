@@ -2,152 +2,250 @@
 
 ## 项目概述
 
-本项目旨在构建一个基于本地大语言模型的法律法规智能问答系统，结合 RAG（检索增强生成）技术与 Agent 任务调度，实现允许多轮交互、任务调用的智能问答功能。
+本项目构建一个基于本地大语言模型的法律法规智能问答系统，结合 RAG（检索增强生成）技术与多 Agent 编排，支持多轮交互、按法律名精确定位法条、自动引用原文作答。已通过端到端验证：303 部法律 / 22,482 条法条 / 两阶段 FAISS 检索 / Ollama 本地 LLM（bge-m3 + qwen2.5:7b）跑通完整 5 阶段管道。
 
 ## 项目背景
 
-在大模型快速发展背景下，法律领域对智能问答与信息抽取提出更高要求。面对海量法律法规文档，如何构建自主知识库并结合本地 LLM 进行问答成为重要研究方向。本项目以国家法律法规数据库等公共法律数据库为数据源，通过文档处理构建本地法规知识库，并利用 RAG+Agent 技术构建智能问答系统。
+法律领域文档量大、引用关系严格，单纯的 LLM 容易幻觉。本项目以 303 部法律法规、22,000+ 条法条为基础，自建嵌入索引，把检索从“全库 Top-K”改为“先找法律 → 再找法条”两段式，强约束回答在正确法律内，最后用本地 LLM 生成带法条引用的答案。
 
-## 技术栈
+## 核心技术栈
 
-| 类别 | 选型 |
-|------|------|
-| LLM | DeepSeek / 通义千问 / LLaMA3（优先国产模型） |
-| 部署方式 | Ollama 本地部署 / API 接入 |
-| 文档处理 | python-docx |
-| 向量数据库 | ChromaDB（开发）/ Qdrant（生产） |
-| RAG 框架 | LangChain |
-| Agent 框架 | LangGraph（多 Agent 协作） |
-| Web 框架 | FastAPI |
-| 嵌入模型 | sentence-transformers（中文模型） |
-
-## 项目目标
-
-### 核心任务
-1. **部署本地 LLM**：支持 DeepSeek、通义千问等国产模型，Ollama 或 API 接入
-2. **数据采集**：编写爬虫/文档处理程序，获取法律法规文本
-3. **文档向量化**：清洗、分段、向量化处理
-4. **构建 RAG 问答系统**：检索 + 生成
-5. **多 Agent 协作**：使用 LangChain/LangGraph 实现 Agent 任务调度
-6. **Web 界面**：FastAPI 提供 RESTful API 接口
-7. **技术文档**：编写项目文档，提交汇报材料
-
-### 附加要求
-- 使用 FastAPI 搭建系统服务端接口，支持 RESTful 调用
-- 构建测试数据集：至少 100 条问答样本
-
-## 项目结构
-
-```
-.
-├── 法律原文/                    # 原始法律文档（.docx）
-├── 法律解释修正案/              # 法律解释与修正案
-├── dataset/                     # 处理后的数据集
-│   ├── laws_dataset_*.json     # 结构化数据
-│   ├── laws_dataset_*.csv      # CSV 索引
-│   └── all_articles_*.txt      # 完整法条文本
-├── crawler.py                   # 文档处理脚本
-├── doc_to_dataset.py           # 法条切分工具
-├── chromadb_crud.py            # 向量数据库 CRUD 教程
-└── README.md                   # 项目说明文档
-```
+| 类别 | 选型 | 状态 |
+|---|---|---|
+| Embedding | Ollama + bge-m3（1024 维）/ HuggingFace BAAI/bge-small-zh-v1.5 | ✅ 已跑通 |
+| 向量索引 | FAISS（两段：法律名 + 法条） | ✅ 全量已建 |
+| LLM | Ollama + qwen2.5:7b / DeepSeek API | ✅ Ollama 已跑通 |
+| Embedding / LLM 切换 | subprocess + curl 批量端点 | ✅ 已封装 |
+| 检索框架 | LangChain FAISS + 自写 ArticleFetcher | ✅ |
+| 多轮上下文 | 累积历史 → Stage 1 改写 | ✅ |
+| Web 服务 | FastAPI（计划中） | ⏳ |
+| Agent 编排 | LangGraph（计划中） | ⏳ |
 
 ## 数据统计
 
-- 法律原文文档：**300+ 部**
-- 覆盖法律类型：宪法、民法商法、行政法规、刑法、刑事诉讼法、劳动法、社会保障法、知识产权法、环境保护法等
-- 法条总数：**24,000+ 条**
-- 法律解释与修正案：**40+ 份**
+- 法律：**303 部**（唯一去重）
+- 法条：**22,482 条**
+- 覆盖：宪法、民法商法、行政法、刑法、刑事诉讼法、社会法、经济法、资源环境法等
+- 数据位置：`law_clearnerdata/laws_dataset_*.json`
+
+## 5 阶段管道（已实现）
+
+```
+用户问题
+   ↓
+[1] Query Rewriter       把"它/那部法律"还原成具体法律名（qwen2.5 LLM）
+   ↓
+[2] Law Name Matcher     FAISS 在 303 部法律名里找 top-3
+   ↓
+[3] Article Fetcher      从 3 部法律的全部法条拉候选（in-memory 字典 O(1)）
+   ↓
+[4] Article Ranker       bge-m3 批量 embed 候选法条 + 余弦相似度 Top-10
+   ↓
+[5] QA Agent             qwen2.5 LLM 按 prompt 写答案 + 引用《法律名》第X条
+   ↓
+最终答案（带法条原文引用）
+```
+
+每阶段独立可替换，接口都遵循 LangChain / 自写 dataclass 协议。
+
+## 性能（已验证）
+
+测试问题：`草原保护有什么方针？`（303 部法律 / 22,482 条法条 / Ollama 本地）
+
+| 阶段 | 耗时 | 说明 |
+|---|---|---|
+| 1_rewrite | ~4.0 s | qwen2.5:7b 改写问题 |
+| 2_match_laws | ~1.7 s | bge-m3 + FAISS Top-3 |
+| 3_fetch | <10 ms | in-memory 字典 |
+| 4_rank | ~9.4 s | `/api/embed` 批量 32 条，7 次请求 |
+| 5_answer | ~9.0 s | qwen2.5:7b 生成答案 |
+| **总耗时** | **~24 s** | 端到端（已含模型冷启动） |
 
 ## 快速开始
 
 ### 1. 环境准备
 
 ```bash
-# 创建虚拟环境
-python3 -m venv venv
-source venv/bin/activate
+# 1) 安装 Ollama（macOS）
+brew install ollama
+# 或下载安装：https://ollama.com/download
 
-# 安装依赖
-pip install python-docx chromadb langchain langchain-chroma langchain-community
-pip install sentence-transformers fastapi uvicorn
+# 2) 拉模型
+ollama pull bge-m3        # 1.2 GB，1024 维中文 embedding
+ollama pull qwen2.5:7b    # 4.7 GB，本地 LLM
+
+# 3) 启动 Ollama（自动后台运行）
+ollama serve
 ```
-
-### 2. 数据处理
 
 ```bash
-# 处理法律原文
-python3 doc_to_dataset.py "法律原文" -o dataset
-
-# 处理法律解释修正案
-python3 doc_to_dataset.py "法律解释修正案" -o dataset_supplement
+# 4) 装 Python 依赖
+pip install -U \
+  langchain langchain-community langchain-core \
+  faiss-cpu sentence-transformers numpy
 ```
 
-### 3. 构建向量数据库
-
-```python
-from langchain_chroma import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
-
-# 加载嵌入模型
-embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-)
-
-# 加载向量数据库
-db = Chroma(
-    persist_directory="./vector_db",
-    embedding_function=embeddings
-)
-```
-
-### 4. 启动 API 服务
+### 2. 跑 demo
 
 ```bash
-uvicorn api:app --reload
+cd /Users/icec0re/Desktop/git_submit/local_rag_legal
+
+# 一次性建索引（~5-10 分钟，全量）
+KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 \
+  python3 demo/build_indexes.py \
+  --embed-backend ollama --embed-model bge-m3 --reset
+
+# 单条问答
+KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 \
+  python3 demo/run_demo.py \
+  -q "草原保护有什么方针？" \
+  --embed-backend ollama --embed-model bge-m3 \
+  --llm-backend ollama --llm-model qwen2.5:7b
+
+# REPL 多轮
+KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 \
+  python3 demo/run_demo.py \
+  --embed-backend ollama --embed-model bge-m3 \
+  --llm-backend ollama --llm-model qwen2.5:7b
 ```
 
-## 测试数据集
+REPL 中输入 `q` / `quit` / `exit` 退出。多轮上下文会自动累积喂给 Stage 1 改写。
 
-测试数据集采用以下 JSON 结构：
+### 3. 切到 HuggingFace Embedding（无 Ollama）
 
-```json
-[
-  {
-    "question": "我国最低工资标准是多少？",
-    "expected_answer": "最低工资标准由各省份制定，例如北京市为每月2320元。",
-    "retrieved_text": "根据《最低工资规定》第二条...",
-    "model_output": "北京市最低工资目前为2320元。",
-    "evaluation_note": "回答基本准确，但未强调地区差异。"
-  }
-]
+```bash
+python3 demo/build_indexes.py --embed-backend hf --reset
+python3 demo/run_demo.py \
+  -q "草原保护有什么方针？" \
+  --embed-backend hf \
+  --llm-backend ollama --llm-model qwen2.5:7b
 ```
 
-### 字段说明
+### 4. 切到 DeepSeek API
 
-| 字段 | 说明 |
-|------|------|
-| question | 待检索并问答的问题文本 |
-| expected_answer | 人工标注的标准答案 |
-| retrieved_text | 系统返回的检索段落（可选） |
-| model_output | 模型或 Agent 生成的最终回答 |
-| evaluation_note | 评价意见或备注 |
+```bash
+export DEEPSEEK_API_KEY="sk-..."
+python3 demo/run_demo.py \
+  -q "草原保护有什么方针？" \
+  --embed-backend ollama --embed-model bge-m3 \
+  --llm-backend deepseek
+```
+
+## 测试问题清单
+
+**Level 1｜单段召回**
+
+```bash
+for q in \
+  "草原保护有什么方针？" \
+  "数据泄露怎么处理？" \
+  "醉驾在法律上如何处理？" \
+  "个人信息被泄露可以请求哪些救济？" \
+  "中医医院的管理规定是什么？"
+do
+  KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 \
+    python3 demo/run_demo.py -q "$q" \
+    --embed-backend ollama --embed-model bge-m3 \
+    --llm-backend ollama --llm-model qwen2.5:7b
+done
+```
+
+**Level 2｜多轮指代改写（REPL 验证）**
+
+```
+你> 国家对草原保护有什么方针？
+你> 它第三条具体说了什么？
+你> 违反这部法律怎么处罚？
+你> q
+```
+
+**Level 3｜边界场景**
+
+- 抽象问：`什么是连带责任？`
+- 跨法律：`员工受伤公司怎么赔？`
+- 否定/反问：`草原法第三条没说什么？`
+
+## 后端切换矩阵
+
+| 维度 | 选项 | 切换方式 |
+|---|---|---|
+| Embedding | bge-m3 / bge-large / BGE-small-zh / M3E | `--embed-backend ollama --embed-model <name>` |
+| LLM | qwen2.5:7b / deepseek-chat / gpt-4o-mini | `--llm-backend ollama --llm-model <name>` 或设 `DEEPSEEK_API_KEY` |
+| 向量索引 | FAISS | `demo/indexes/{law_names,articles}/` |
+
+## 关键技术细节
+
+### 1. 两段检索 vs 单段
+
+| 维度 | 单段（22K Top-K） | 两段（303 → 200 → 10） |
+|---|---|---|
+| 召回率 | 中（热门法律挤掉小众） | 高（强约束在正确法律） |
+| 精度 | 中 | 高 |
+| 适合 | 开放域 | 法规/手册这种强领域 |
+
+### 2. Embedding 批量调用
+
+用 Ollama `/api/embed` 端点（不是 `/api/embeddings`），`BATCH=32`：
+
+- 200 候选 / 32 ≈ 7 次请求
+- 单次响应 ~1-2 s
+- 相比单条串行：30 s → 9 s（约 3×）
+
+### 3. Sandbox 兼容
+
+当前 sandbox 下 Python HTTP 客户端（`requests` / `urllib`）会被 502，所以 `RobustOllamaEmbeddings` / `RobustOllamaLLM` 都用 `subprocess + curl`。如果你的环境是普通 macOS / Linux，可以直接换回 `requests`，代码更简洁。
+
+### 4. 超长法条截断
+
+`MAX_EMBED_CHARS = 1200`（`demo/build_indexes.py`）：超过 1200 字的法条用前 1200 字做 embedding，metadata 里仍保留全文。这是为了避开 bge-m3 的 4096 上下文限制。`max_article_len` 实际是 24,399 字（民法典某条）。
+
+## 项目结构
+
+```
+local_rag_legal/
+├── README.md
+├── LICENSE
+├── law_clearnerdata/                # 数据
+│   ├── laws_dataset_*.json         #   303 部法律 / 22,482 条法条
+│   ├── laws_dataset_*.csv
+│   └── all_articles_*.txt
+├── start_test/                      # 学习路径（m1 → m7）
+│   ├── m1_explore_data.py
+│   ├── m2_first_embedding.py
+│   ├── m3_encode_and_search.py
+│   ├── m4_chroma.py
+│   ├── m5_benchmark.py
+│   ├── m6_rag.py
+│   ├── m7_multi_agent_chat.py
+│   └── m7_memory_test.py
+└── demo/                            # 生产路径（5 阶段管道）
+    ├── README.md
+    ├── build_indexes.py             #   一次性建 FAISS
+    ├── pipeline.py                  #   5 阶段核心逻辑
+    ├── run_demo.py                  #   CLI 入口
+    ├── test_pipeline_no_llm.py      #   离线两段检索测试
+    └── indexes/                     #   FAISS 持久化（git ignore）
+        ├── law_names/
+        └── articles/
+```
 
 ## 后续计划
 
-- [ ] 接入 DeepSeek API 进行 RAG 问答验证
-- [ ] 构建多 Agent 协作框架
-- [ ] 设计 FastAPI 接口
-- [ ] 编写 100+ 条测试问答对
-- [ ] 评估系统性能
-- [ ] 部署本地 LLM 模型（Ollama）
+- [x] 5 阶段管道端到端跑通
+- [x] bge-m3 + qwen2.5:7b 切换为默认（替代 deepseek-r1:7b）
+- [x] Embedding 批量调用（30 s → 9 s）
+- [ ] FastAPI 包成 `/api/chat`
+- [ ] 100+ 条测试集 + 自动评估脚本
+- [ ] LangGraph 多 Agent 编排
+- [ ] 嵌入模型自动评估（bge-m3 vs bge-large vs M3E）
 
 ## 参考文献
 
 - [国家法律法规数据库](https://flk.npc.gov.cn/)
-- [LangChain 官方文档](https://python.langchain.com/)
-- [ChromaDB 官方文档](https://docs.trychroma.com/)
-- [FastAPI 官方文档](https://fastapi.tiangolo.com/)
+- [Ollama](https://ollama.com/)
+- [bge-m3 on HuggingFace](https://huggingface.co/BAAI/bge-m3)
+- [qwen2.5 on Ollama](https://ollama.com/library/qwen2.5)
+- [LangChain FAISS](https://python.langchain.com/docs/integrations/vectorstores/faiss)
 
 ## 致谢
 
@@ -155,4 +253,4 @@ uvicorn api:app --reload
 
 ---
 
-*本项目为实习项目，目标构建一个完整的法律法规智能问答系统。*
+*本项目为实习项目，目标是构建一个完整的法律法规智能问答系统。*

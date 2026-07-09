@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# FAISS / 向量库
+demo/indexes/
+start_test/vector_db/
+start_test/__pycache__/
+demo/__pycache__/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# 日志
+*.log
