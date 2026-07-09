@@ -191,7 +191,7 @@ def build_embeddings(backend: str, model: str = ""):
             def embed_documents(self, texts: list[str]) -> list[list[float]]:
                 # 用 Ollama 的 /api/embed 批量端点 + subprocess+curl
                 # 走 curl 而不是 urllib，是因为 sandbox 下 Python HTTP 不稳
-                BATCH = 32
+                BATCH = 128
                 out: list[list[float]] = []
                 total = len(texts)
                 for i in range(0, total, BATCH):

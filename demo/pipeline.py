@@ -82,6 +82,9 @@ class PipelineResult:
     final_articles: list[tuple[Document, float]]  # (doc, score)
     answer: str
     timings: dict[str, float] = field(default_factory=dict)
+    ttft_ms: float = 0.0        # Stage 5 改写/回答的首字延迟（TTFT）
+    llm_tokens: int = 0         # Stage 5 输出的 token 数
+    llm_total_ms: float = 0.0   # Stage 5 LLM 总耗时（与 timings["5_answer"] 一致）
 
 
 # ============================================================
@@ -141,7 +144,7 @@ def build_embeddings(backend: str = "hf", model: str = ""):
 
             def embed_documents(self, texts):
                 # 走 /api/embed 批量端点 + subprocess+curl（与 build_indexes.py 同步）
-                BATCH = 32
+                BATCH = 128
                 out: list[list[float]] = []
                 total = len(texts)
                 for i in range(0, total, BATCH):
@@ -213,49 +216,87 @@ def build_llm(backend: str = "deepseek", model: str = ""):
         import subprocess
         import json
 
+        class LLMResult:
+            """LLM 调用结果，包含文本和首字延迟 (TTFT) / 总延迟。"""
+            __slots__ = ("text", "ttft_ms", "total_ms", "tokens")
+            def __init__(self, text: str, ttft_ms: float, total_ms: float, tokens: int):
+                self.text = text
+                self.ttft_ms = ttft_ms
+                self.total_ms = total_ms
+                self.tokens = tokens
+            def __str__(self):
+                return self.text
+
         class RobustOllamaLLM:
             """
             用 subprocess 调 curl 跑 Ollama LLM（绕过 sandbox 对 Python HTTP 的限制）。
-            遵循 LangChain LLM 协议：invoke() 返回 str。
+            遵循 LangChain LLM 协议：invoke() 返回 LLMResult（带 text / ttft_ms / total_ms）。
             """
             def __init__(self, model: str, base_url: str):
                 self.model = model
                 self.base_url = base_url.rstrip("/")
 
-            def _post(self, prompt: str) -> str:
+            def _post(self, prompt: str) -> LLMResult:
                 payload = json.dumps({
                     "model": self.model,
                     "prompt": prompt,
-                    "stream": False,
+                    "stream": True,
                     "keep_alive": "30m",
                 })
                 last_err = None
                 for attempt in range(3):
+                    t_start = time.time()
+                    ttft_ms = None
+                    chunks: list[str] = []
+                    token_count = 0
                     try:
-                        result = subprocess.run(
-                            ["curl", "-s", "-X", "POST",
+                        proc = subprocess.Popen(
+                            ["curl", "-s", "--no-buffer", "-X", "POST",
                              f"{self.base_url}/api/generate",
                              "-H", "Content-Type: application/json",
                              "-d", payload],
-                            capture_output=True, text=True, timeout=600,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
                         )
-                        if result.returncode != 0:
-                            raise RuntimeError(f"curl rc={result.returncode}: {result.stderr}")
-                        body = result.stdout
-                        if not body:
+                        assert proc.stdout is not None
+                        for line in proc.stdout:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                obj = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            if ttft_ms is None:
+                                ttft_ms = (time.time() - t_start) * 1000
+                            delta = obj.get("response", "")
+                            if delta:
+                                chunks.append(delta)
+                                token_count += 1
+                            if obj.get("done"):
+                                break
+                        proc.wait(timeout=600)
+                        if not chunks:
                             raise RuntimeError("empty response (model reloading?)")
-                        data = json.loads(body)
-                        if "response" not in data:
-                            raise RuntimeError(f"no response field: {body[:300]}")
-                        return data["response"]
+                        total_ms = (time.time() - t_start) * 1000
+                        return LLMResult(
+                            text="".join(chunks),
+                            ttft_ms=ttft_ms or total_ms,
+                            total_ms=total_ms,
+                            tokens=token_count,
+                        )
                     except Exception as e:
                         last_err = e
                         print(f"      [LLM try {attempt+1}/3] {type(e).__name__}: {e}")
-                        import time as _t
-                        _t.sleep(3)
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+                        time.sleep(3)
                 raise RuntimeError(f"LLM 失败 3 次: {last_err}")
 
-            def invoke(self, prompt, **kwargs) -> str:
+            def invoke(self, prompt, **kwargs):
                 # 处理 ChatPromptTemplate 输出的多 message 格式
                 if hasattr(prompt, "to_string"):
                     prompt = prompt.to_string()
@@ -311,7 +352,10 @@ class QueryRewriter:
         prompt = REWRITE_PROMPT.format(history=history or "（无）", query=query)
         try:
             out = self.llm.invoke(prompt)
-            if hasattr(out, "content"):
+            # 兼容 LLMResult / 带 .content 的消息对象 / 纯 str
+            if hasattr(out, "text"):
+                out = out.text
+            elif hasattr(out, "content"):
                 out = out.content
         except Exception as e:
             print(f"[WARN] 改写失败：{e}，退回原问题")
@@ -387,11 +431,43 @@ class ArticleFetcher:
         print(f"[INIT] ArticleFetcher: {len(self.law_to_articles)} 部法律, "
               f"{total} 条法条")
 
+        # 关键词 → 法律名 反查表（用于 Stage 2 跳过 FAISS）
+        # 把"草原"、"网络安全"、"中医药"等核心实体词映射到对应法律
+        # 用法律名去掉前缀/后缀得到的核心 2~4 字作 key
+        self.alias_to_law: dict[str, str] = {}
+        for title in self.law_to_articles.keys():
+            # 例如"中华人民共和国草原法" → 核心"草原法"
+            core = title
+            for prefix in ("中华人民共和国", "全国人民代表大会常务委员会", "最高人民法院", "最高人民检察院"):
+                if core.startswith(prefix):
+                    core = core[len(prefix):]
+            core = core.strip()
+            # 排除补充规定、解释、修正案等，避免歧义
+            if any(k in core for k in ["解释", "修正", "补充", "决定", "批复", "意见"]):
+                continue
+            if 2 <= len(core) <= 8:
+                self.alias_to_law[core] = title
+
     def __call__(self, law_titles: Iterable[str]) -> list[Document]:
         out: list[Document] = []
         for t in law_titles:
             out.extend(self.law_to_articles.get(t, []))
         return out
+
+    def keyword_lookup(self, text: str) -> list[str]:
+        """在文本里找法律名关键词，返回对应法律名（去重保序，最多 3 部）"""
+        seen: set[str] = set()
+        hits: list[str] = []
+        # 长 alias 优先匹配（避免"刑法"先吃掉"刑法修正案"等）
+        for alias in sorted(self.alias_to_law.keys(), key=len, reverse=True):
+            if alias in text:
+                law = self.alias_to_law[alias]
+                if law not in seen:
+                    seen.add(law)
+                    hits.append(law)
+                    if len(hits) >= 3:
+                        break
+        return hits
 
 
 # ============================================================
@@ -400,39 +476,55 @@ class ArticleFetcher:
 
 class ArticleRanker:
     """
-    给定候选法条 + query，按相似度重排，取 top-K。
-    直接用 embedding 模型算点积。
+    Hybrid 精排器：
+      1) FAISS 粗排：限定在 law_filter（Stage 2 命中的法律）里搜 Top-fetch_k
+         - 有 law_filter：FAISS with filter，强约束在正确法律
+         - 无 law_filter：回退到 FAISS 全库搜（粗排场景）
+         - 无 article_db：回退到传入的 candidates
+      2) bge-m3 精排：对这 K1 条重新编码 + 点积，取 Top-K
+    相对暴力精排（200 候选全重编码）快 ~3-5 倍。
     """
 
-    def __init__(self, embeddings):
+    def __init__(self, embeddings, article_db=None, fetch_k: int = 50):
         self.embeddings = embeddings
+        self.article_db = article_db
+        self.fetch_k = fetch_k
 
     def __call__(
         self,
         query: str,
-        candidates: list[Document],
+        candidates: list[Document] | None = None,
         top_k: int = 10,
+        law_filter: list[str] | None = None,
     ) -> list[tuple[Document, float]]:
-        if not candidates:
-            return []
-        if len(candidates) <= top_k:
-            # 候选比 top_k 还少，全要
-            cand_vecs = self.embeddings.embed_documents(
-                [c.page_content for c in candidates]
-            )
-            q_vec = self.embeddings.embed_query(BGE_QUERY_PREFIX + query)
-            scores = np.dot(cand_vecs, q_vec)
-            return list(zip(candidates, scores.tolist()))
+        q = BGE_QUERY_PREFIX + query
 
-        # 候选多：先粗筛（FAISS 文章索引），再精排
-        # 这里直接精排：embed 全部候选，排序取 top_k
+        # 1) 粗排
+        coarse: list[Document] = []
+        if self.article_db is not None and law_filter:
+            # 强约束：在 Stage 2 命中的法律里搜
+            coarse = self.article_db.similarity_search(
+                q, k=self.fetch_k,
+                filter={"law_title": {"$in": list(law_filter)}},
+            )
+        elif self.article_db is not None:
+            # 无过滤：全库搜
+            coarse = self.article_db.similarity_search(q, k=self.fetch_k)
+        else:
+            # 兜底：传入的 candidates
+            coarse = candidates or []
+
+        if not coarse:
+            return []
+
+        # 2) 精排
         cand_vecs = self.embeddings.embed_documents(
-            [c.page_content for c in candidates]
+            [c.page_content for c in coarse]
         )
-        q_vec = self.embeddings.embed_query(BGE_QUERY_PREFIX + query)
+        q_vec = self.embeddings.embed_query(q)
         scores = np.array(np.dot(cand_vecs, q_vec))
         top_idx = np.argsort(-scores)[:top_k]
-        return [(candidates[i], float(scores[i])) for i in top_idx]
+        return [(coarse[i], float(scores[i])) for i in top_idx]
 
 
 # ============================================================
@@ -456,16 +548,28 @@ class QAAgent:
             )
         return "\n\n".join(lines)
 
-    def __call__(self, query: str, articles: list[tuple[Document, float]]) -> str:
+    def __call__(self, query: str, articles: list[tuple[Document, float]]) -> tuple[str, dict]:
+        """
+        返回 (answer_text, llm_meta)
+        llm_meta = {"ttft_ms": ..., "total_ms": ..., "tokens": ..., "ok": True/False}
+        """
         context = self._format_context(articles)
         prompt = QA_PROMPT.format(context=context, question=query)
         try:
             out = self.llm.invoke(prompt)
-            if hasattr(out, "content"):
-                out = out.content
-            return out
+            if hasattr(out, "text"):           # RobustOllamaLLM.LLMResult
+                meta = {
+                    "ttft_ms": getattr(out, "ttft_ms", 0.0),
+                    "total_ms": getattr(out, "total_ms", 0.0),
+                    "tokens": getattr(out, "tokens", 0),
+                    "ok": True,
+                }
+                return out.text, meta
+            if hasattr(out, "content"):         # ChatMessage 风格
+                return out.content, {"ttft_ms": 0.0, "total_ms": 0.0, "tokens": 0, "ok": True}
+            return str(out), {"ttft_ms": 0.0, "total_ms": 0.0, "tokens": 0, "ok": True}
         except Exception as e:
-            return f"[LLM 调用失败: {e}]"
+            return f"[LLM 调用失败: {e}]", {"ttft_ms": 0.0, "total_ms": 0.0, "tokens": 0, "ok": False}
 
 
 # ============================================================
@@ -512,9 +616,17 @@ class LegalRAGPipeline:
         self.rewriter = QueryRewriter(self.llm)
         self.law_matcher = LawNameMatcher(self.law_matcher_db)
         self.fetcher = ArticleFetcher(DATA_DIR)
-        self.ranker = ArticleRanker(self.embeddings)
+        # ArticleRanker 注入 article_db：FAISS 粗排 + bge-m3 精排
+        self.ranker = ArticleRanker(self.embeddings, article_db=self.article_db, fetch_k=50)
         self.qa = QAAgent(self.llm)
         print("[BOOT] 全部就绪。\n")
+
+    def _keyword_law_match(self, text: str) -> list[str]:
+        """
+        在改写后的问题里做关键词匹配，命中"草原法"、"网络安全法"等已知法律名。
+        命中就跳过 Stage 2 的 FAISS 调用。
+        """
+        return self.fetcher.keyword_lookup(text)
 
     def run(
         self,
@@ -532,7 +644,13 @@ class LegalRAGPipeline:
 
         # Stage 2: 法律名匹配
         t0 = time.time()
-        matched = self.law_matcher(rewritten, top_k=top_laws)
+        # 先用关键词兜底（改写后的问题里若已含"草原法""网络安全法"等，跳过 FAISS）
+        kw_matched = self._keyword_law_match(rewritten)
+        if kw_matched:
+            matched = kw_matched
+            print(f"[Stage 2] 用关键词匹配: {matched}")
+        else:
+            matched = self.law_matcher(rewritten, top_k=top_laws)
         timings["2_match_laws"] = time.time() - t0
 
         # Stage 3: 取法条
@@ -540,14 +658,14 @@ class LegalRAGPipeline:
         candidates = self.fetcher(matched)
         timings["3_fetch"] = time.time() - t0
 
-        # Stage 4: 重排
+        # Stage 4: 重排（限定在 Stage 2 命中的法律里）
         t0 = time.time()
-        ranked = self.ranker(rewritten, candidates, top_k=top_articles)
+        ranked = self.ranker(rewritten, candidates, top_k=top_articles, law_filter=matched)
         timings["4_rank"] = time.time() - t0
 
         # Stage 5: 回答
         t0 = time.time()
-        answer = self.qa(query, ranked)
+        answer, llm_meta = self.qa(query, ranked)
         timings["5_answer"] = time.time() - t0
 
         return PipelineResult(
@@ -557,6 +675,9 @@ class LegalRAGPipeline:
             final_articles=ranked,
             answer=answer,
             timings=timings,
+            ttft_ms=llm_meta.get("ttft_ms", 0.0),
+            llm_tokens=llm_meta.get("tokens", 0),
+            llm_total_ms=llm_meta.get("total_ms", 0.0),
         )
 
     def run_with_trace(self, query: str, history: str = "", no_rewrite: bool = False) -> PipelineResult:
@@ -577,10 +698,10 @@ class LegalRAGPipeline:
             candidates = self.fetcher(matched)
             timings["3_fetch"] = time.time() - t0
             t0 = time.time()
-            ranked = self.ranker(rewritten, candidates, top_k=10)
+            ranked = self.ranker(rewritten, candidates, top_k=10, law_filter=matched)
             timings["4_rank"] = time.time() - t0
             t0 = time.time()
-            answer = self.qa(query, ranked)
+            answer, llm_meta = self.qa(query, ranked)
             timings["5_answer"] = time.time() - t0
             res = PipelineResult(
                 rewritten_query=rewritten,
@@ -589,6 +710,9 @@ class LegalRAGPipeline:
                 final_articles=ranked,
                 answer=answer,
                 timings=timings,
+                ttft_ms=llm_meta.get("ttft_ms", 0.0),
+                llm_tokens=llm_meta.get("tokens", 0),
+                llm_total_ms=llm_meta.get("total_ms", 0.0),
             )
         else:
             res = self.run(query, history)
@@ -603,7 +727,38 @@ class LegalRAGPipeline:
         print(f"\n[Stage 5] 回答:\n{res.answer}")
 
         total = sum(res.timings.values())
+        # Stage 名称映射（更可读）
+        stage_label = {
+            "1_rewrite": "[1] Query Rewriter",
+            "2_match_laws": "[2] Law Name Matcher",
+            "3_fetch": "[3] Article Fetcher",
+            "4_rank": "[4] Article Ranker (hybrid)",
+            "5_answer": "[5] QA Agent",
+        }
+        # 累计 LLM / Embedding 调用时间（粗略分类）
+        llm_stages = {"1_rewrite", "5_answer"}
+        emb_stages = {"2_match_laws", "4_rank"}
+        llm_ms = sum(res.timings[k] for k in llm_stages) * 1000
+        emb_ms = sum(res.timings[k] for k in emb_stages) * 1000
+
         print(f"\n[TIMING] 总耗时 {total*1000:.0f} ms")
+        print(f"   ├─ LLM 调用合计    : {llm_ms:6.0f} ms  ({llm_ms / (total*1000) * 100:5.1f}%)")
+        print(f"   ├─ Embedding 合计  : {emb_ms:6.0f} ms  ({emb_ms / (total*1000) * 100:5.1f}%)")
+        print(f"   └─ 其他（IO/排序）: {(total*1000 - llm_ms - emb_ms):6.0f} ms")
+        print()
+        print(f"   {'阶段':<28} {'耗时':>8} {'占比':>8}")
+        print(f"   {'-'*28} {'-'*8} {'-'*8}")
         for k, v in res.timings.items():
-            print(f"   - {k}: {v*1000:.0f} ms")
+            pct = v / total * 100 if total > 0 else 0
+            print(f"   {stage_label.get(k, k):<28} {v*1000:7.0f}ms {pct:7.1f}%")
+        # Stage 5 LLM 详细指标：首字延迟 / token 数 / token/s
+        if res.ttft_ms > 0 or res.llm_tokens > 0:
+            tok_s = (res.llm_tokens / (res.llm_total_ms / 1000)) if res.llm_total_ms > 0 else 0
+            print()
+            print(f"   [Stage 5 LLM 详细]")
+            print(f"   ├─ 首字延迟 TTFT   : {res.ttft_ms:6.0f} ms")
+            print(f"   ├─ 累计 token 数   : {res.llm_tokens}")
+            print(f"   ├─ LLM 总耗时      : {res.llm_total_ms:6.0f} ms")
+            if tok_s > 0:
+                print(f"   └─ 生成速度        : {tok_s:6.1f} tok/s")
         return res
