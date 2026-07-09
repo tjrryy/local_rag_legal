@@ -1,0 +1,834 @@
+[
+  {
+    "id": 1,
+    "query": "草原保护的方针是什么？",
+    "category": "事实查询",
+    "domain": "环境资源法",
+    "expected_law": "中华人民共和国草原法",
+    "difficulty": "easy",
+    "note": "README基线"
+  },
+  {
+    "id": 2,
+    "query": "数据泄露应当如何处理？",
+    "category": "事实查询",
+    "domain": "数据安全",
+    "expected_law": "中华人民共和国数据安全法",
+    "difficulty": "easy",
+    "note": "README基线"
+  },
+  {
+    "id": 3,
+    "query": "醉驾在法律上如何处理？",
+    "category": "事实查询",
+    "domain": "刑法/交通",
+    "expected_law": "中华人民共和国刑法",
+    "difficulty": "easy",
+    "note": "README基线"
+  },
+  {
+    "id": 4,
+    "query": "个人信息被泄露可以请求哪些救济？",
+    "category": "事实查询",
+    "domain": "个人信息保护",
+    "expected_law": "中华人民共和国个人信息保护法",
+    "difficulty": "easy",
+    "note": "README基线"
+  },
+  {
+    "id": 5,
+    "query": "中医药怎么管理？",
+    "category": "事实查询",
+    "domain": "医药卫生",
+    "expected_law": "中华人民共和国中医药法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 6,
+    "query": "单位拖欠工资怎么办？",
+    "category": "实务咨询",
+    "domain": "劳动法",
+    "expected_law": "中华人民共和国劳动合同法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 7,
+    "query": "农村土地承包的方式有哪些？",
+    "category": "事实查询",
+    "domain": "农业/土地",
+    "expected_law": "中华人民共和国农村土地承包法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 8,
+    "query": "网络安全法对网络运营者规定了哪些安全保护义务？",
+    "category": "事实查询",
+    "domain": "网络安全",
+    "expected_law": "中华人民共和国网络安全法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 9,
+    "query": "农民工工资被拖欠由谁承担责任？",
+    "category": "实务咨询",
+    "domain": "劳动法",
+    "expected_law": "保障农民工工资支付条例",
+    "difficulty": "easy"
+  },
+  {
+    "id": 10,
+    "query": "个人所得税的工资薪金税率是多少？",
+    "category": "事实查询",
+    "domain": "税法",
+    "expected_law": "中华人民共和国个人所得税法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 11,
+    "query": "消费者权益保护法规定消费者有哪些基本权利？",
+    "category": "事实查询",
+    "domain": "消费者保护",
+    "expected_law": "中华人民共和国消费者权益保护法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 12,
+    "query": "劳动合同在什么情况下可以解除？",
+    "category": "事实查询",
+    "domain": "劳动法",
+    "expected_law": "中华人民共和国劳动合同法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 13,
+    "query": "商标权的有效期是多少年？",
+    "category": "事实查询",
+    "domain": "知识产权法",
+    "expected_law": "中华人民共和国商标法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 14,
+    "query": "消防法规定单位有哪些消防安全职责？",
+    "category": "事实查询",
+    "domain": "公共安全",
+    "expected_law": "中华人民共和国消防法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 15,
+    "query": "传染病防治法对疫情报告有什么规定？",
+    "category": "事实查询",
+    "domain": "公共卫生",
+    "expected_law": "中华人民共和国传染病防治法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 16,
+    "query": "治安管理处罚的种类有哪些？",
+    "category": "事实查询",
+    "domain": "行政法",
+    "expected_law": "中华人民共和国治安管理处罚法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 17,
+    "query": "公司法规定设立有限责任公司需要什么条件？",
+    "category": "事实查询",
+    "domain": "商法",
+    "expected_law": "中华人民共和国公司法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 18,
+    "query": "民法典规定哪些情形下合同无效？",
+    "category": "事实查询",
+    "domain": "民法",
+    "expected_law": "中华人民共和国民法典",
+    "difficulty": "medium"
+  },
+  {
+    "id": 19,
+    "query": "反食品浪费法的立法目的是什么？",
+    "category": "事实查询",
+    "domain": "经济法",
+    "expected_law": "中华人民共和国反食品浪费法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 20,
+    "query": "家庭教育促进法规定了哪些家庭教育内容？",
+    "category": "事实查询",
+    "domain": "社会法",
+    "expected_law": "中华人民共和国家庭教育促进法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 21,
+    "query": "医师法对医师执业注册有什么要求？",
+    "category": "事实查询",
+    "domain": "医药卫生",
+    "expected_law": "中华人民共和国医师法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 22,
+    "query": "种子法对种子生产经营许可有什么规定？",
+    "category": "事实查询",
+    "domain": "农业法",
+    "expected_law": "中华人民共和国种子法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 23,
+    "query": "核安全法规定了哪些核安全管理制度？",
+    "category": "事实查询",
+    "domain": "能源/安全",
+    "expected_law": "中华人民共和国核安全法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 24,
+    "query": "生物安全法的适用范围包括哪些领域？",
+    "category": "事实查询",
+    "domain": "生物安全",
+    "expected_law": "中华人民共和国生物安全法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 25,
+    "query": "高等教育自学考试的学历层次有哪些？",
+    "category": "事实查询",
+    "domain": "教育法",
+    "expected_law": "中华人民共和国高等教育法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 26,
+    "query": "员工在工作时间受伤公司应当如何赔偿？",
+    "category": "跨法律查询",
+    "domain": "劳动法/社会保障",
+    "expected_law": "工伤保险条例/中华人民共和国劳动合同法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 27,
+    "query": "网购个人信息被泄露消费者可以依据哪些法律维权？",
+    "category": "跨法律查询",
+    "domain": "消费者保护/个人信息",
+    "expected_law": "中华人民共和国个人信息保护法/中华人民共和国消费者权益保护法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 28,
+    "query": "企业排放污水造成农田污染农户应当依据什么法律索赔？",
+    "category": "跨法律查询",
+    "domain": "环境法/侵权",
+    "expected_law": "中华人民共和国水污染防治法/中华人民共和国民法典",
+    "difficulty": "medium"
+  },
+  {
+    "id": 29,
+    "query": "开发商延期交房购房者有哪些法律救济途径？",
+    "category": "跨法律查询",
+    "domain": "房地产/合同法",
+    "expected_law": "中华人民共和国民法典/中华人民共和国城市房地产管理法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 30,
+    "query": "公司未签劳动合同且拖欠工资员工如何维权？",
+    "category": "跨法律查询",
+    "domain": "劳动法",
+    "expected_law": "中华人民共和国劳动合同法/中华人民共和国劳动争议调解仲裁法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 31,
+    "query": "医疗事故发生后患者可以向哪些部门投诉并主张赔偿？",
+    "category": "跨法律查询",
+    "domain": "医疗/侵权",
+    "expected_law": "医疗事故处理条例/中华人民共和国民法典",
+    "difficulty": "hard"
+  },
+  {
+    "id": 32,
+    "query": "小区物业擅自涨物业费业主有什么法律依据维权？",
+    "category": "跨法律查询",
+    "domain": "物业管理/合同法",
+    "expected_law": "中华人民共和国民法典",
+    "difficulty": "medium"
+  },
+  {
+    "id": 33,
+    "query": "网约车发生交通事故导致乘客受伤应当向谁索赔？",
+    "category": "跨法律查询",
+    "domain": "交通/侵权",
+    "expected_law": "中华人民共和国道路交通安全法/中华人民共和国民法典",
+    "difficulty": "medium"
+  },
+  {
+    "id": 34,
+    "query": "公司破产后员工工资和社保费用如何处理？",
+    "category": "跨法律查询",
+    "domain": "商法/劳动法",
+    "expected_law": "中华人民共和国企业破产法/中华人民共和国劳动合同法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 35,
+    "query": "外卖平台商家销售过期食品消费者如何维权？平台要承担责任吗？",
+    "category": "跨法律查询",
+    "domain": "食品安全/电商",
+    "expected_law": "中华人民共和国食品安全法/中华人民共和国电子商务法",
+    "difficulty": "hard"
+  },
+  {
+    "id": 36,
+    "query": "建筑工地夜间施工噪声扰民居民可以依据哪些法律投诉？",
+    "category": "跨法律查询",
+    "domain": "环境法/行政法",
+    "expected_law": "中华人民共和国噪声污染防治法/中华人民共和国环境保护法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 37,
+    "query": "未成年人在学校与同学打闹受伤学校和家长的责任如何划分？",
+    "category": "跨法律查询",
+    "domain": "侵权法/教育法",
+    "expected_law": "中华人民共和国民法典/中华人民共和国未成年人保护法",
+    "difficulty": "hard"
+  },
+  {
+    "id": 38,
+    "query": "房屋租赁合同到期后租客拒不搬走房东应该怎么办？",
+    "category": "跨法律查询",
+    "domain": "合同法/民事诉讼法",
+    "expected_law": "中华人民共和国民法典/中华人民共和国民事诉讼法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 39,
+    "query": "公司股东抽逃出资其他股东有什么法律救济措施？",
+    "category": "跨法律查询",
+    "domain": "商法",
+    "expected_law": "中华人民共和国公司法/中华人民共和国刑法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 40,
+    "query": "网络直播虚假宣传主播和平台分别承担什么法律责任？",
+    "category": "跨法律查询",
+    "domain": "广告法/电商法",
+    "expected_law": "中华人民共和国广告法/中华人民共和国电子商务法",
+    "difficulty": "hard"
+  },
+  {
+    "id": 41,
+    "query": "什么是连带责任？",
+    "category": "概念解释",
+    "domain": "民法",
+    "expected_law": "中华人民共和国民法典",
+    "difficulty": "medium"
+  },
+  {
+    "id": 42,
+    "query": "什么是不可抗力？它在法律上有什么效果？",
+    "category": "概念解释",
+    "domain": "民法",
+    "expected_law": "中华人民共和国民法典",
+    "difficulty": "medium"
+  },
+  {
+    "id": 43,
+    "query": "法人是什么？法人和非法人组织有什么区别？",
+    "category": "概念对比",
+    "domain": "民法",
+    "expected_law": "中华人民共和国民法典",
+    "difficulty": "medium"
+  },
+  {
+    "id": 44,
+    "query": "正当防卫和紧急避险有什么区别？",
+    "category": "概念对比",
+    "domain": "刑法",
+    "expected_law": "中华人民共和国刑法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 45,
+    "query": "什么是诉讼时效？诉讼时效中断和中止有什么不同？",
+    "category": "概念解释",
+    "domain": "民法",
+    "expected_law": "中华人民共和国民法典",
+    "difficulty": "medium"
+  },
+  {
+    "id": 46,
+    "query": "善意取得制度是什么？需要满足哪些条件？",
+    "category": "概念解释",
+    "domain": "民法/物权",
+    "expected_law": "中华人民共和国民法典",
+    "difficulty": "medium"
+  },
+  {
+    "id": 47,
+    "query": "什么是不当得利？它与无因管理有什么区别？",
+    "category": "概念对比",
+    "domain": "民法",
+    "expected_law": "中华人民共和国民法典",
+    "difficulty": "hard"
+  },
+  {
+    "id": 48,
+    "query": "行政强制措施和行政处罚有什么区别？",
+    "category": "概念对比",
+    "domain": "行政法",
+    "expected_law": "中华人民共和国行政强制法/中华人民共和国行政处罚法",
+    "difficulty": "hard"
+  },
+  {
+    "id": 49,
+    "query": "什么是举证责任倒置？在哪些案件中适用？",
+    "category": "概念解释",
+    "domain": "诉讼法",
+    "expected_law": "中华人民共和国民事诉讼法/中华人民共和国民法典",
+    "difficulty": "hard"
+  },
+  {
+    "id": 50,
+    "query": "刑事责任年龄是怎么划分的？各年龄段有何不同？",
+    "category": "概念解释",
+    "domain": "刑法",
+    "expected_law": "中华人民共和国刑法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 51,
+    "query": "国家对草原保护有什么方针？",
+    "category": "多轮对话-首问",
+    "domain": "环境资源法",
+    "expected_law": "中华人民共和国草原法",
+    "difficulty": "easy",
+    "multi_turn_group": "A",
+    "turn": 1
+  },
+  {
+    "id": 52,
+    "query": "这部法律的第三条具体说了什么？",
+    "category": "多轮对话-指代",
+    "domain": "环境资源法",
+    "expected_law": "中华人民共和国草原法",
+    "difficulty": "medium",
+    "multi_turn_group": "A",
+    "turn": 2
+  },
+  {
+    "id": 53,
+    "query": "违反它规定的禁止性行为会受到什么处罚？",
+    "category": "多轮对话-指代",
+    "domain": "环境资源法",
+    "expected_law": "中华人民共和国草原法",
+    "difficulty": "medium",
+    "multi_turn_group": "A",
+    "turn": 3
+  },
+  {
+    "id": 54,
+    "query": "刚才提到的处罚包括哪些种类？",
+    "category": "多轮对话-指代",
+    "domain": "环境资源法",
+    "expected_law": "中华人民共和国草原法",
+    "difficulty": "hard",
+    "multi_turn_group": "A",
+    "turn": 4
+  },
+  {
+    "id": 55,
+    "query": "它在第六章还规定了什么内容？",
+    "category": "多轮对话-指代",
+    "domain": "环境资源法",
+    "expected_law": "中华人民共和国草原法",
+    "difficulty": "hard",
+    "multi_turn_group": "A",
+    "turn": 5
+  },
+  {
+    "id": 56,
+    "query": "劳动合同法对试用期的长短有什么规定？",
+    "category": "多轮对话-首问",
+    "domain": "劳动法",
+    "expected_law": "中华人民共和国劳动合同法",
+    "difficulty": "easy",
+    "multi_turn_group": "B",
+    "turn": 1
+  },
+  {
+    "id": 57,
+    "query": "它规定的试用期最长可以是多少个月？",
+    "category": "多轮对话-指代",
+    "domain": "劳动法",
+    "expected_law": "中华人民共和国劳动合同法",
+    "difficulty": "medium",
+    "multi_turn_group": "B",
+    "turn": 2
+  },
+  {
+    "id": 58,
+    "query": "如果在试用期内被辞退劳动者有什么权利？",
+    "category": "多轮对话-指代",
+    "domain": "劳动法",
+    "expected_law": "中华人民共和国劳动合同法",
+    "difficulty": "medium",
+    "multi_turn_group": "B",
+    "turn": 3
+  },
+  {
+    "id": 59,
+    "query": "那部法律对经济补偿金是怎么规定的？",
+    "category": "多轮对话-指代",
+    "domain": "劳动法",
+    "expected_law": "中华人民共和国劳动合同法",
+    "difficulty": "medium",
+    "multi_turn_group": "B",
+    "turn": 4
+  },
+  {
+    "id": 60,
+    "query": "个人信息保护法赋予了个人哪些权利？",
+    "category": "多轮对话-首问",
+    "domain": "个人信息保护",
+    "expected_law": "中华人民共和国个人信息保护法",
+    "difficulty": "easy",
+    "multi_turn_group": "C",
+    "turn": 1
+  },
+  {
+    "id": 61,
+    "query": "它的适用范围是什么？",
+    "category": "多轮对话-指代",
+    "domain": "个人信息保护",
+    "expected_law": "中华人民共和国个人信息保护法",
+    "difficulty": "hard",
+    "multi_turn_group": "C",
+    "turn": 2
+  },
+  {
+    "id": 62,
+    "query": "违反该法处理个人信息应当承担什么责任？",
+    "category": "多轮对话-指代",
+    "domain": "个人信息保护",
+    "expected_law": "中华人民共和国个人信息保护法",
+    "difficulty": "hard",
+    "multi_turn_group": "C",
+    "turn": 3
+  },
+  {
+    "id": 63,
+    "query": "草原法第三条没有规定什么？",
+    "category": "边界测试",
+    "domain": "环境资源法",
+    "expected_law": "中华人民共和国草原法",
+    "difficulty": "hard",
+    "note": "否定反问"
+  },
+  {
+    "id": 64,
+    "query": "所有中国法律都适用于香港特别行政区吗？",
+    "category": "边界测试",
+    "domain": "宪法/基本法",
+    "expected_law": "中华人民共和国香港特别行政区基本法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 65,
+    "query": "什么是法律？",
+    "category": "边界测试",
+    "domain": "法学基础",
+    "expected_law": "中华人民共和国立法法",
+    "difficulty": "hard",
+    "note": "极宽泛问题"
+  },
+  {
+    "id": 66,
+    "query": "宪法和普通法律有什么关系？",
+    "category": "边界测试",
+    "domain": "宪法",
+    "expected_law": "中华人民共和国宪法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 67,
+    "query": "外国人能否在中国提起行政诉讼？",
+    "category": "边界测试",
+    "domain": "行政诉讼法",
+    "expected_law": "中华人民共和国行政诉讼法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 68,
+    "query": "AI自动生成的文章是否受著作权法保护？",
+    "category": "边界测试",
+    "domain": "知识产权法",
+    "expected_law": "中华人民共和国著作权法",
+    "difficulty": "hard",
+    "note": "新兴前沿问题"
+  },
+  {
+    "id": 69,
+    "query": "自动驾驶汽车发生交通事故责任谁承担？",
+    "category": "边界测试",
+    "domain": "交通/侵权",
+    "expected_law": "中华人民共和国道路交通安全法/中华人民共和国民法典",
+    "difficulty": "hard",
+    "note": "新兴前沿问题"
+  },
+  {
+    "id": 70,
+    "query": "如果新法和旧法对同一事项规定不一致适用哪一部？",
+    "category": "边界测试",
+    "domain": "立法法",
+    "expected_law": "中华人民共和国立法法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 71,
+    "query": "法律、行政法规和地方性法规的效力等级有什么区别？",
+    "category": "边界测试",
+    "domain": "立法法",
+    "expected_law": "中华人民共和国立法法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 72,
+    "query": "法律条文没有明确规定的事项是否可以参照类似规定处理？",
+    "category": "边界测试",
+    "domain": "民法",
+    "expected_law": "中华人民共和国民法典",
+    "difficulty": "hard"
+  },
+  {
+    "id": 73,
+    "query": "行政处罚的追诉时效是多长时间？",
+    "category": "边界测试",
+    "domain": "行政法",
+    "expected_law": "中华人民共和国行政处罚法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 74,
+    "query": "程序违法但实体处理正确行政处罚决定是否有效？",
+    "category": "边界测试",
+    "domain": "行政法",
+    "expected_law": "中华人民共和国行政处罚法/中华人民共和国行政诉讼法",
+    "difficulty": "hard"
+  },
+  {
+    "id": 75,
+    "query": "紧急状态下公民的基本权利可以被限制吗？",
+    "category": "边界测试",
+    "domain": "宪法",
+    "expected_law": "中华人民共和国宪法/中华人民共和国突发事件应对法",
+    "difficulty": "hard"
+  },
+  {
+    "id": 76,
+    "query": "什么是法律保留原则？哪些事项只能由法律规定？",
+    "category": "边界测试",
+    "domain": "立法法",
+    "expected_law": "中华人民共和国立法法",
+    "difficulty": "hard"
+  },
+  {
+    "id": 77,
+    "query": "我国法律规定公民的言论自由有边界吗？有哪些限制？",
+    "category": "边界测试",
+    "domain": "宪法/刑法",
+    "expected_law": "中华人民共和国宪法/中华人民共和国刑法",
+    "difficulty": "hard"
+  },
+  {
+    "id": 78,
+    "query": "全国人民代表大会有哪些主要职权？",
+    "category": "领域专项",
+    "domain": "宪法",
+    "expected_law": "中华人民共和国宪法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 79,
+    "query": "民法典规定了哪几种物权？",
+    "category": "领域专项",
+    "domain": "民法/物权",
+    "expected_law": "中华人民共和国民法典",
+    "difficulty": "medium"
+  },
+  {
+    "id": 80,
+    "query": "申请行政复议需要满足什么条件？",
+    "category": "领域专项",
+    "domain": "行政法",
+    "expected_law": "中华人民共和国行政复议法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 81,
+    "query": "盗窃罪的构成要件是什么？数额标准如何影响定罪？",
+    "category": "领域专项",
+    "domain": "刑法",
+    "expected_law": "中华人民共和国刑法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 82,
+    "query": "反垄断法禁止哪些垄断行为？",
+    "category": "领域专项",
+    "domain": "经济法",
+    "expected_law": "中华人民共和国反垄断法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 83,
+    "query": "社会保险法规定国家建立了哪些社会保险制度？",
+    "category": "领域专项",
+    "domain": "社会法",
+    "expected_law": "中华人民共和国社会保险法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 84,
+    "query": "环境影响评价制度的主要内容是什么？哪些项目需要做环评？",
+    "category": "领域专项",
+    "domain": "环境资源法",
+    "expected_law": "中华人民共和国环境影响评价法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 85,
+    "query": "工作日加班和休息日加班的加班费计算标准分别是多少？",
+    "category": "领域专项",
+    "domain": "劳动法",
+    "expected_law": "中华人民共和国劳动法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 86,
+    "query": "发明专利、实用新型和外观设计的保护期限分别是多久？",
+    "category": "领域专项",
+    "domain": "知识产权法",
+    "expected_law": "中华人民共和国专利法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 87,
+    "query": "犯罪嫌疑人从拘留到法院审判刑事诉讼程序包括哪些阶段？",
+    "category": "领域专项",
+    "domain": "刑事诉讼法",
+    "expected_law": "中华人民共和国刑事诉讼法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 88,
+    "query": "民事诉讼中哪些材料可以作为证据？",
+    "category": "领域专项",
+    "domain": "民事诉讼法",
+    "expected_law": "中华人民共和国民事诉讼法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 89,
+    "query": "道路交通安全法对酒驾的处罚是怎样规定的？",
+    "category": "领域专项",
+    "domain": "交通法",
+    "expected_law": "中华人民共和国道路交通安全法",
+    "difficulty": "easy"
+  },
+  {
+    "id": 90,
+    "query": "义务教育阶段学生享有哪些权利？学校和家长分别有哪些义务？",
+    "category": "领域专项",
+    "domain": "教育法",
+    "expected_law": "中华人民共和国义务教育法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 91,
+    "query": "反洗钱法规定金融机构应当履行哪些反洗钱义务？",
+    "category": "领域专项",
+    "domain": "金融法",
+    "expected_law": "中华人民共和国反洗钱法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 92,
+    "query": "国防法规定公民有哪些国防义务？",
+    "category": "领域专项",
+    "domain": "宪法/军事法",
+    "expected_law": "中华人民共和国国防法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 93,
+    "query": "向法院提起民事诉讼需要满足哪些起诉条件？",
+    "category": "程序法",
+    "domain": "民事诉讼法",
+    "expected_law": "中华人民共和国民事诉讼法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 94,
+    "query": "刑事诉讼中被告人的辩护权如何得到保障？",
+    "category": "程序法",
+    "domain": "刑事诉讼法",
+    "expected_law": "中华人民共和国刑事诉讼法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 95,
+    "query": "行政诉讼的受案范围是什么？哪些行政行为不能被起诉？",
+    "category": "程序法",
+    "domain": "行政诉讼法",
+    "expected_law": "中华人民共和国行政诉讼法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 96,
+    "query": "劳动争议必须先经过劳动仲裁才能去法院起诉吗？",
+    "category": "程序法",
+    "domain": "劳动法/诉讼法",
+    "expected_law": "中华人民共和国劳动争议调解仲裁法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 97,
+    "query": "民事判决生效后如何申请强制执行？期限是多长？",
+    "category": "程序法",
+    "domain": "民事诉讼法",
+    "expected_law": "中华人民共和国民事诉讼法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 98,
+    "query": "什么是证据保全？在什么条件下可以申请？",
+    "category": "程序法",
+    "domain": "民事诉讼法",
+    "expected_law": "中华人民共和国民事诉讼法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 99,
+    "query": "上诉的期限是多久？上诉需要满足什么条件？",
+    "category": "程序法",
+    "domain": "诉讼法",
+    "expected_law": "中华人民共和国民事诉讼法/中华人民共和国刑事诉讼法",
+    "difficulty": "medium"
+  },
+  {
+    "id": 100,
+    "query": "再审程序在什么情况下可以启动？谁有权申请再审？",
+    "category": "程序法",
+    "domain": "诉讼法",
+    "expected_law": "中华人民共和国民事诉讼法/中华人民共和国刑事诉讼法",
+    "difficulty": "hard"
+  }
+]
