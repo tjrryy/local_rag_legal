@@ -38,12 +38,26 @@ MAX_EMBED_CHARS = 1200
 
 # ---- LLM Prompts ----
 
-REWRITE_PROMPT = """你是法律领域查询改写助手。请把用户的【最新问题】改写成一个独立的、可直接检索的问题。
+REWRITE_PROMPT = """你是法律查询改写器。唯一任务：检查用户问题中是否有指代词（"它"、"那个"、"这部法律"、"该法"、"其"等）。有就替换为具体名称，没有就原样输出。不要做任何其他修改。
 
-规则：
-1. 如果问题里有指代（"它"、"那个"、"这部法律"、"第三条"等），结合【对话历史】还原
-2. 不要补充新信息，不要回答问题本身
-3. 输出只有改写后的问题，不要任何解释
+判断流程（必须遵守）：
+第一步：检查问题中是否有指代词。
+第二步：如果没有指代词 → 逐字原样输出【用户最新问题】，一个字都不要改。
+第三步：如果有指代词 → 结合【对话历史】把指代词替换为具体法律全名或条文号，其余部分一字不改。
+
+严禁的行为（违反即错误）：
+- 给没有指代词的问题添加法律名、法条号或任何其他内容
+- 替换法律术语（如"醉驾"改成"酒驾"、"中医药"改成"中医疗法"）
+- 改变原问题的句式、措辞或提问方式
+- 在法律名后添加"中"、"的"等字（原文没有就不要加）
+
+正确示例：
+  输入："草原保护的方针是什么？" → 输出："草原保护的方针是什么？"
+  输入："数据泄露应当如何处理？" → 输出："数据泄露应当如何处理？"
+  输入："它第三条说了什么？" + 历史提到草原法 → 输出："草原法第三条说了什么？"
+
+错误示例（禁止）：
+  输入："草原保护的方针是什么？" → 输出："中华人民共和国草原法的方针是什么？" ← 错误！没指代不能加
 
 【对话历史】
 {history}
@@ -51,7 +65,7 @@ REWRITE_PROMPT = """你是法律领域查询改写助手。请把用户的【最
 【用户最新问题】
 {query}
 
-【改写后的问题】"""
+改写结果："""
 
 
 QA_PROMPT = """你是中国法律领域的智能助手。请严格根据下面【法条参考】回答用户问题。
@@ -125,7 +139,7 @@ def build_embeddings(backend: str = "hf", model: str = ""):
                              f"{self.base_url}/api/embeddings",
                              "-H", "Content-Type: application/json",
                              "-d", payload],
-                            capture_output=True, text=True, timeout=120,
+                            capture_output=True, encoding="utf-8", errors="replace", timeout=120,
                         )
                         if result.returncode != 0:
                             raise RuntimeError(f"curl rc={result.returncode}: {result.stderr}")
@@ -163,7 +177,7 @@ def build_embeddings(backend: str = "hf", model: str = ""):
                                  f"{self.base_url}/api/embed",
                                  "-H", "Content-Type: application/json",
                                  "-d", payload],
-                                capture_output=True, text=True, timeout=120,
+                                capture_output=True, encoding="utf-8", errors="replace", timeout=120,
                             )
                             if result.returncode != 0:
                                 raise RuntimeError(f"curl rc={result.returncode}: {result.stderr}")
@@ -257,7 +271,7 @@ def build_llm(backend: str = "deepseek", model: str = ""):
                              "-d", payload],
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE,
-                            text=True,
+                            encoding="utf-8", errors="replace",
                         )
                         assert proc.stdout is not None
                         for line in proc.stdout:

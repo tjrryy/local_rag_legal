@@ -16,5 +16,10 @@ demo/__pycache__/
 .idea/
 .DS_Store
 
+# 评测输出
+eval_results/
+test_set_100_annotated.csv
+test_set_5.csv
+
 # 日志
 *.log
