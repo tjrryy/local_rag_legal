@@ -14,6 +14,7 @@ from pipeline import (  # noqa: E402
     LegalRAGPipeline,
     BGE_QUERY_PREFIX,
 )
+from session_memory import SessionMemory  # noqa: E402
 
 
 def render_history(history: list[dict]) -> str:
@@ -38,6 +39,7 @@ def repl_stream(pipeline: LegalRAGPipeline):
     print("=" * 60)
 
     history: list[dict] = []
+    memory = SessionMemory()
 
     while True:
         try:
@@ -51,7 +53,7 @@ def repl_stream(pipeline: LegalRAGPipeline):
             print("[BYE]")
             return
 
-        history_str = render_history(history)
+        history_str = memory.get_history_str()
 
         # Stage 1: 改写
         print(f"\n[Stage 1] 改写...")
@@ -105,10 +107,13 @@ def repl_stream(pipeline: LegalRAGPipeline):
 
         answer = llm_meta.get("text", "")
 
-        # 累积历史
-        history.append({"q": q, "a": answer})
-        if len(history) > 10:
-            history = history[-10:]
+        # 写入会话记忆
+        memory.record(
+            question=q,
+            answer=answer,
+            matched_laws=matched,
+            ranked_articles=ranked,
+        )
 
 
 def main():
@@ -192,12 +197,14 @@ def main():
             print("[BYE]")
             return
 
-        history_str = render_history(history)
-        result = pipeline.run_with_trace(q, history_str)
-        # 累积历史
-        history.append({"q": q, "a": result.answer})
-        if len(history) > 10:
-            history = history[-10:]
+        result = pipeline.run_with_trace(q, memory.get_history_str())
+        # 写入会话记忆
+        memory.record(
+            question=q,
+            answer=result.answer,
+            matched_laws=result.matched_laws,
+            ranked_articles=result.final_articles,
+        )
 
 
 if __name__ == "__main__":
