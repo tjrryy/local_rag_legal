@@ -236,7 +236,7 @@ def build_llm(backend: str = "deepseek", model: str = ""):
                 self.model = model
                 self.base_url = base_url.rstrip("/")
 
-            def _post(self, prompt: str) -> LLMResult:
+            def _post(self, prompt: str, stream_callback=None) -> LLMResult:
                 payload = json.dumps({
                     "model": self.model,
                     "prompt": prompt,
@@ -274,6 +274,8 @@ def build_llm(backend: str = "deepseek", model: str = ""):
                             if delta:
                                 chunks.append(delta)
                                 token_count += 1
+                                if stream_callback:
+                                    stream_callback(delta)
                             if obj.get("done"):
                                 break
                         proc.wait(timeout=600)
@@ -306,6 +308,20 @@ def build_llm(backend: str = "deepseek", model: str = ""):
                 elif not isinstance(prompt, str):
                     prompt = str(prompt)
                 return self._post(prompt)
+
+            def invoke_stream(self, prompt, callback=print):
+                """
+                流式调用：每个 chunk 生成后立即回调 callback(text)。
+                callback 默认 print，逐字打印到终端。
+                返回 (text, ttft_ms, total_ms, tokens)。
+                """
+                if hasattr(prompt, "to_string"):
+                    prompt = prompt.to_string()
+                elif hasattr(prompt, "content"):
+                    prompt = prompt.content if hasattr(prompt, "content") else str(prompt)
+                elif not isinstance(prompt, str):
+                    prompt = str(prompt)
+                return self._post(prompt, stream_callback=callback)
 
         return RobustOllamaLLM(
             model=model or "qwen2.5:7b",
@@ -570,6 +586,27 @@ class QAAgent:
             return str(out), {"ttft_ms": 0.0, "total_ms": 0.0, "tokens": 0, "ok": True}
         except Exception as e:
             return f"[LLM 调用失败: {e}]", {"ttft_ms": 0.0, "total_ms": 0.0, "tokens": 0, "ok": False}
+
+    def stream(self, query: str, articles: list[tuple[Document, float]], callback=print) -> dict:
+        """
+        流式调用：每个 token 生成后立即回调 callback(token)。
+        返回 llm_meta。
+        """
+        context = self._format_context(articles)
+        prompt = QA_PROMPT.format(context=context, question=query)
+        try:
+            out = self.llm.invoke_stream(prompt, callback=callback)
+            if hasattr(out, "text"):
+                meta = {
+                    "ttft_ms": getattr(out, "ttft_ms", 0.0),
+                    "total_ms": getattr(out, "total_ms", 0.0),
+                    "tokens": getattr(out, "tokens", 0),
+                    "ok": True,
+                }
+                return meta
+            return {"ttft_ms": 0.0, "total_ms": 0.0, "tokens": 0, "ok": False}
+        except Exception as e:
+            return {"ttft_ms": 0.0, "total_ms": 0.0, "tokens": 0, "ok": False}
 
 
 # ============================================================
