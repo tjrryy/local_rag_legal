@@ -18,3 +18,9 @@ demo/__pycache__/
 
 # 日志
 *.log
+
+# Chainlit 运行时
+.files/
+chainlit.db
+chainlit.md
+.chainlit/translations/

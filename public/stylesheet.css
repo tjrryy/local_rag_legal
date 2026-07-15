@@ -1,0 +1,9 @@
+/* 法律问答助手 */
+
+/* 隐藏主题切换，避免冲突 */
+button[class*="theme"], [class*="theme-toggle"] { display: none !important; }
+
+/* 样例按钮 */
+.action-button {
+  border-radius: 8px !important;
+}

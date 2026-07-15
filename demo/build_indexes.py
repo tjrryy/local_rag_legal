@@ -171,7 +171,7 @@ def build_embeddings(backend: str, model: str = ""):
                              f"{self.base_url}/api/embeddings",
                              "-H", "Content-Type: application/json",
                              "-d", payload],
-                            capture_output=True, text=True, timeout=120,
+                            capture_output=True, text=True, encoding="utf-8", timeout=120,
                         )
                         if result.returncode != 0:
                             raise RuntimeError(f"curl rc={result.returncode}: {result.stderr}")
@@ -210,7 +210,7 @@ def build_embeddings(backend: str, model: str = ""):
                                  f"{self.base_url}/api/embed",
                                  "-H", "Content-Type: application/json",
                                  "-d", payload],
-                                capture_output=True, text=True, timeout=120,
+                                capture_output=True, text=True, encoding="utf-8", timeout=120,
                             )
                             if result.returncode != 0:
                                 raise RuntimeError(f"curl rc={result.returncode}: {result.stderr}")
