@@ -6,24 +6,21 @@
 
 | 文件 | 作用 |
 |---|---|
-| `build_indexes.py` | 一次性建 2 个 FAISS 索引（法律名 + 法条） |
+| `chainlit_app.py` | Chainlit Web 前端（流式问答 + 文件上传） |
 | `pipeline.py` | 5 阶段管道核心逻辑 |
 | `run_demo.py` | CLI 入口（REPL / 单条） |
+| `run_eval.py` | 100 条自动化评测 |
+| `build_indexes.py` | 一次性建 2 个 FAISS 索引（法律名 + 法条） |
 | `test_pipeline_no_llm.py` | 不调 LLM 的离线两段检索测试 |
 | `indexes/` | FAISS 持久化（git ignore） |
 
-## 最小运行
+## 快速启动
 
 ```bash
-# 1) 装模型
-ollama pull bge-m3
-ollama pull qwen2.5:7b
+# Web 前端
+chainlit run demo/chainlit_app.py
 
-# 2) 建索引
-KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 \
-  python3 demo/build_indexes.py --embed-backend ollama --embed-model bge-m3 --reset
-
-# 3) 跑
+# CLI
 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 \
   python3 demo/run_demo.py \
   --embed-backend ollama --embed-model bge-m3 \

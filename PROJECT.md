@@ -132,19 +132,17 @@ class SessionMemory:
 
 `record()` 写，`get_history_str()` 给 Stage 1 改写用。
 
-### 4.6 FastAPI Web 服务
+### 4.6 Chainlit 聊天前端
 
-单端口设计，白绿青主题，SSE 流式输出：
+ChatGPT 风格 UI，基于 Chainlit 框架：
 
-- `/api/ask-stream`：SSE 流式接口
-  - Stage 1-4 同步跑完 → 先发 `meta` 事件（法律名、法条列表）
-  - Stage 5 token by token → `chunk` 事件逐 token 推送
-  - 结束时发 `done` 事件
-- `/api/ask`：保留非流式 JSON 接口
-- `/api/reset`：清除记忆
-- `/api/new-session`：新建会话
+- 原生流式输出：`msg.stream_token()` token by token 实时推送
+- 文件上传：支持 .txt / .md / .csv，自动提取文字加入问答
+- 样例问题：点击按钮一键体验
+- 多轮对话：自动拼接上下文
+- 侧边栏：会话线程列表（Chainlit 内置）
 
-前端用 `fetch` + `ReadableStream` 接收 SSE，实时渲染 token。
+启动命令：`chainlit run demo/chainlit_app.py --port 8501`
 
 ### 4.7 自动化评测
 
@@ -183,8 +181,10 @@ local_rag_legal/
 ├── law_clearnerdata/              # 数据
 │   └── laws_dataset_*.json         # 303 部法律 / 22,482 条法条
 ├── start_test/                     # 探索脚本 m1~m7
+├── public/                         # 前端静态资源
+├── .chainlit/                      # Chainlit 配置
 └── demo/
-    ├── server.py                  # FastAPI Web 服务（白绿青主题）
+    ├── chainlit_app.py            # Chainlit Web 前端
     ├── pipeline.py                 # 5 阶段核心逻辑
     ├── run_demo.py                # CLI 入口（--stream）
     ├── run_eval.py                 # 自动化评测
@@ -199,7 +199,6 @@ local_rag_legal/
 
 - [ ] SQLite 持久化 SessionMemory（跨会话记忆）
 - [ ] HyDE 全量 100 条评测对比
-- [ ] FastAPI 加 WebSocket 支持（服务端推送）
 - [ ] LangGraph 编排 + 可视化 trace
 
 ---

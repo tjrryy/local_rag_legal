@@ -13,7 +13,8 @@
 | LLM | Ollama + qwen2.5:7b | ✅ |
 | 流式输出 | SSE，token by token 实时推送 | ✅ |
 | 多轮会话 | SessionMemory（进程内存，退出即清）| ✅ |
-| Web 服务 | FastAPI，白绿青主题 | ✅ |
+| Web 前端 | Chainlit（ChatGPT 风格，原生流式） | ✅ |
+| 文件上传 | 支持 .txt / .md / .csv 提取文字问答 | ✅ |
 | 实体抽取 | Stage 1.75：keyword_lookup() 字典命中 < 1ms | ✅ |
 | HyDE | Stage 1.5：LLM 先生成假设回答增强检索（可选 `--hyde`）| ✅ |
 | 自动化评测 | 100 条带标注测试集 + run_eval.py | ✅ |
@@ -23,12 +24,11 @@
 
 ```bash
 # 1) 装依赖
-pip install fastapi uvicorn
+pip install chainlit
 
-# 2) 启动 Web 服务
-cd /Users/icec0re/Desktop/git_submit/local_rag_legal
-python3 demo/server.py
-# → 浏览器打开 http://localhost:8000
+# 2) 启动 Web 前端
+chainlit run demo/chainlit_app.py
+# → 浏览器打开 http://localhost:8501
 
 # 3) CLI REPL（流式）
 KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1 \
@@ -89,14 +89,16 @@ local_rag_legal/
 ├── PROJECT.md                   # 技术文档
 ├── law_clearnerdata/            # 数据（303 部法律 / 22,482 条法条）
 ├── start_test/                  # 探索脚本 m1~m7
+├── public/                      # 前端静态资源（CSS / JS）
+├── .chainlit/                   # Chainlit 配置
 └── demo/
-    ├── server.py                # FastAPI Web 服务（白绿青主题）
-    ├── pipeline.py               # 5 阶段核心逻辑
+    ├── chainlit_app.py          # Chainlit Web 前端（ChatGPT 风格）
+    ├── pipeline.py              # 5 阶段核心逻辑
     ├── run_demo.py              # CLI 入口（--stream）
     ├── run_eval.py              # 100 条自动评测
     ├── eval_set.json            # 100 条带标注测试集
-    ├── session_memory.py         # 会话短期记忆
-    ├── build_indexes.py          # 建 FAISS 索引
+    ├── session_memory.py        # 会话短期记忆
+    ├── build_indexes.py         # 建 FAISS 索引
     ├── test_pipeline_no_llm.py  # 离线检索测试
     └── indexes/                 # FAISS 持久化（git ignore）
 ```
