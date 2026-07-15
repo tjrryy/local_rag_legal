@@ -42,8 +42,8 @@ REWRITE_PROMPT = """你是法律领域查询改写助手。请把用户的【最
 
 规则：
 1. 如果问题里有指代（"它"、"那个"、"这部法律"、"第三条"等），结合【对话历史】还原
-2. 不要补充新信息，不要回答问题本身
-3. 输出只有改写后的问题，不要任何解释
+2. 如果从问题能推断出涉及哪部法律，在改写后的问题开头加上"《法律名》"，帮助后续检索
+3. 不要补充新信息，不要解释，只输出改写后的问题
 
 【对话历史】
 {history}
@@ -90,6 +90,64 @@ class PipelineResult:
 # ============================================================
 #  Embedding / LLM 工厂
 # ============================================================
+
+HYDE_PROMPT = """你是一个法律知识问答系统。根据下面的【用户问题】，生成一段简短、精确的【假设回答】。
+
+要求：
+1. 回答要像法条原文一样简洁、精准
+2. 必须包含具体的法律名称和条文编号
+3. 不需要解释，只需要陈述法律是怎么规定的
+4. 50-150 字以内
+
+【用户问题】
+{query}
+
+【假设回答】"""
+
+
+class HyDEGenerator:
+    """
+    HyDE（Hypothetical Document Embeddings）：
+    用 LLM 先生成一段"假设的法条回答"，
+    再用这段答案和原问题一起 embedding 去搜索。
+    研究表明这比直接搜原问题召回率更高。
+
+    适合法律场景：用户问"醉驾怎么处理" → 假设回答：
+    "根据《刑法》第一百三十三条之一，醉酒驾驶机动车处拘役并处罚金……"
+    → 这个假设回答和真实法条 embedding 更接近。
+    """
+
+    def __init__(self, llm, max_chars: int = 300):
+        self.llm = llm
+        self.max_chars = max_chars  # 截断假设答案长度，避免 embedding 过慢
+
+    def __call__(self, query: str, history: str = "") -> tuple[str, str]:
+        """
+        返回 (query, hyde_answer)
+        - query：原始问题
+        - hyde_answer：LLM 生成的假设回答
+        两者拼接后一同用于 embedding 检索。
+        """
+        prompt = HYDE_PROMPT.format(query=query)
+        try:
+            out = self.llm.invoke(prompt)
+            if hasattr(out, "text"):
+                hyde_text = out.text
+            elif hasattr(out, "content"):
+                hyde_text = out.content
+            else:
+                hyde_text = str(out)
+        except Exception as e:
+            print(f"[WARN] HyDE 生成失败：{e}，退回只用原问题")
+            return query, ""
+
+        hyde_text = hyde_text.strip()
+        if len(hyde_text) > self.max_chars:
+            hyde_text = hyde_text[: self.max_chars]
+        # 拼接：HyDE 风格是用"原问题 + 假设回答"一起搜
+        combined = f"{query} {hyde_text}"
+        return combined, hyde_text
+
 
 def build_embeddings(backend: str = "hf", model: str = ""):
     if backend == "hf":
@@ -624,6 +682,7 @@ class LegalRAGPipeline:
         llm_backend: str = "deepseek",
         embed_model: str = "",
         llm_model: str = "",
+        enable_hyde: bool = False,
     ):
         print("=" * 60)
         print(f"[BOOT] 初始化 5 阶段管道 ...")
@@ -656,6 +715,11 @@ class LegalRAGPipeline:
         # ArticleRanker 注入 article_db：FAISS 粗排 + bge-m3 精排
         self.ranker = ArticleRanker(self.embeddings, article_db=self.article_db, fetch_k=50)
         self.qa = QAAgent(self.llm)
+        # HyDE：可选，在 Stage 1 和 Stage 2 之间加一层假设回答增强检索
+        self.enable_hyde = enable_hyde
+        self.hyde = HyDEGenerator(self.llm) if enable_hyde else None
+        if enable_hyde:
+            print(f"       [+] HyDE 已启用：Stage 1.5 生成假设回答增强检索")
         print("[BOOT] 全部就绪。\n")
 
     def _keyword_law_match(self, text: str) -> list[str]:
@@ -679,15 +743,31 @@ class LegalRAGPipeline:
         rewritten = self.rewriter(query, history)
         timings["1_rewrite"] = time.time() - t0
 
+        # Stage 1.5: HyDE（可选）
+        search_query = rewritten  # 默认用改写后的问题搜
+        hyde_text = ""
+        if self.enable_hyde and self.hyde is not None:
+            t0 = time.time()
+            search_query, hyde_text = self.hyde(rewritten, history)
+            timings["1.5_hyde"] = time.time() - t0
+            print(f"[Stage 1.5] HyDE 生成: {hyde_text[:60]}...")
+
+        # Stage 1.75: 实体抽取（纯字典，无需 LLM）
+        # 在改写后问题里匹配法律名关键词 → 直接注入 Stage 2，跳过 FAISS
+        t0 = time.time()
+        entity_hint = self.fetcher.keyword_lookup(search_query)
+        timings["1.75_entity"] = time.time() - t0
+        if entity_hint:
+            print(f"[Stage 1.75] 实体命中: {entity_hint}")
+
         # Stage 2: 法律名匹配
         t0 = time.time()
-        # 先用关键词兜底（改写后的问题里若已含"草原法""网络安全法"等，跳过 FAISS）
-        kw_matched = self._keyword_law_match(rewritten)
-        if kw_matched:
-            matched = kw_matched
-            print(f"[Stage 2] 用关键词匹配: {matched}")
+        # 优先级：实体字典 > HyDE法律名 > FAISS
+        if entity_hint:
+            matched = entity_hint
+            print(f"[Stage 2] 用实体命中: {matched}")
         else:
-            matched = self.law_matcher(rewritten, top_k=top_laws)
+            matched = self.law_matcher(search_query, top_k=top_laws)
         timings["2_match_laws"] = time.time() - t0
 
         # Stage 3: 取法条
@@ -697,7 +777,7 @@ class LegalRAGPipeline:
 
         # Stage 4: 重排（限定在 Stage 2 命中的法律里）
         t0 = time.time()
-        ranked = self.ranker(rewritten, candidates, top_k=top_articles, law_filter=matched)
+        ranked = self.ranker(search_query, candidates, top_k=top_articles, law_filter=matched)
         timings["4_rank"] = time.time() - t0
 
         # Stage 5: 回答
@@ -728,14 +808,21 @@ class LegalRAGPipeline:
             timings: dict[str, float] = {}
             rewritten = query
             timings["1_rewrite"] = 0.0
+            # HyDE for no_rewrite path
+            search_query = rewritten
+            hyde_text = ""
+            if self.enable_hyde and self.hyde is not None:
+                t0 = time.time()
+                search_query, hyde_text = self.hyde(rewritten, "")
+                timings["1.5_hyde"] = time.time() - t0
             t0 = time.time()
-            matched = self.law_matcher(rewritten, top_k=3)
+            matched = self.law_matcher(search_query, top_k=3)
             timings["2_match_laws"] = time.time() - t0
             t0 = time.time()
             candidates = self.fetcher(matched)
             timings["3_fetch"] = time.time() - t0
             t0 = time.time()
-            ranked = self.ranker(rewritten, candidates, top_k=10, law_filter=matched)
+            ranked = self.ranker(search_query, candidates, top_k=10, law_filter=matched)
             timings["4_rank"] = time.time() - t0
             t0 = time.time()
             answer, llm_meta = self.qa(query, ranked)
@@ -767,6 +854,8 @@ class LegalRAGPipeline:
         # Stage 名称映射（更可读）
         stage_label = {
             "1_rewrite": "[1] Query Rewriter",
+            "1.5_hyde": "[1.5] HyDE",
+            "1.75_entity": "[1.75] 实体抽取",
             "2_match_laws": "[2] Law Name Matcher",
             "3_fetch": "[3] Article Fetcher",
             "4_rank": "[4] Article Ranker (hybrid)",

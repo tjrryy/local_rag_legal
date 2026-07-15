@@ -169,6 +169,7 @@ def main():
     parser.add_argument("--limit", type=int, default=100, help="评测条数")
     parser.add_argument("--eval-file", default="demo/eval_set.json")
     parser.add_argument("--no-rewrite", action="store_true")
+    parser.add_argument("--hyde", action="store_true", help="启用 HyDE 增强检索")
     args = parser.parse_args()
 
     print(f"[INIT] 评测配置：")
@@ -176,12 +177,14 @@ def main():
     print(f"  llm:   {args.llm_backend}/{args.llm_model}")
     print(f"  评测文件: {args.eval_file}")
     print(f"  评测条数: {args.limit}")
+    print(f"  HyDE:   {'启用' if args.hyde else '禁用'}")
 
     pipeline = LegalRAGPipeline(
         embed_backend=args.embed_backend,
         llm_backend=args.llm_backend,
         embed_model=args.embed_model,
         llm_model=args.llm_model,
+        enable_hyde=args.hyde,
     )
 
     items = json.loads(Path(args.eval_file).read_text(encoding="utf-8"))

@@ -128,6 +128,8 @@ def main():
     parser.add_argument("--llm-model", default="", help="覆盖默认 LLM 模型")
     parser.add_argument("--no-rewrite", action="store_true",
                         help="跳过 Stage 1 Query Rewriter（排查用）")
+    parser.add_argument("--hyde", action="store_true",
+                        help="启用 HyDE：在 Stage 1 和 Stage 2 之间加假设回答增强检索")
     parser.add_argument("--stream", action="store_true",
                         help="REPL 模式启用 Stage 5 流式输出")
     args = parser.parse_args()
@@ -138,6 +140,7 @@ def main():
         llm_backend=args.llm_backend,
         embed_model=args.embed_model,
         llm_model=args.llm_model,
+        enable_hyde=args.hyde,
     )
 
     # 单条模式
