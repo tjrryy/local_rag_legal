@@ -4,6 +4,7 @@
 """
 
 import argparse
+import os
 import time
 import sys
 from pathlib import Path
@@ -128,24 +129,37 @@ def main():
         help="LLM 后端",
     )
     parser.add_argument("--top-laws", type=int, default=3, help="召回法律数")
-    parser.add_argument("--top-articles", type=int, default=10, help="精排法条数")
+    parser.add_argument("--top-articles", type=int, default=6, help="精排法条数（默认6，减少LLM上下文）")
     parser.add_argument("--embed-model", default="", help="覆盖默认 embedding 模型")
     parser.add_argument("--llm-model", default="", help="覆盖默认 LLM 模型")
+    parser.add_argument("--num-predict", type=int, default=512,
+                        help="限制 LLM 最大生成 token 数（默认512）")
+    parser.add_argument("--ollama-options", default="",
+                        help='额外 Ollama generate options，JSON 格式，例如：\'{"num_gpu":40,"num_thread":8}\'')
     parser.add_argument("--no-rewrite", action="store_true",
                         help="跳过 Stage 1 Query Rewriter（排查用）")
+    parser.add_argument("--no-warm-up", action="store_true",
+                        help="跳过 LLM warm-up（排查用）")
     parser.add_argument("--hyde", action="store_true",
                         help="启用 HyDE：在 Stage 1 和 Stage 2 之间加假设回答增强检索")
     parser.add_argument("--stream", action="store_true",
                         help="REPL 模式启用 Stage 5 流式输出")
     args = parser.parse_args()
 
-    # 加载管道
+    # 加载管道（默认 top-articles=6，优化 LLM 上下文长度）
+    os.environ.setdefault("OLLAMA_NUM_PREDICT", str(args.num_predict))
+    if args.ollama_options:
+        os.environ.setdefault("OLLAMA_OPTIONS", args.ollama_options)
+    if args.no_warm_up:
+        os.environ["OLLAMA_NO_WARM_UP"] = "1"
     pipeline = LegalRAGPipeline(
         embed_backend=args.embed_backend,
         llm_backend=args.llm_backend,
         embed_model=args.embed_model,
         llm_model=args.llm_model,
         enable_hyde=args.hyde,
+        top_laws=args.top_laws,
+        top_articles=args.top_articles,
     )
 
     # 单条模式
@@ -184,7 +198,7 @@ def main():
     print("       （加 --stream 开启流式输出）")
     print("=" * 60)
 
-    history: list[dict] = []
+    memory = SessionMemory()
     while True:
         try:
             q = input("\n你> ").strip()
@@ -198,10 +212,10 @@ def main():
             return
 
         result = pipeline.run_with_trace(q, memory.get_history_str())
-        # 写入会话记忆
+        # 写入会话记忆（简要回答，避免历史过长）
         memory.record(
             question=q,
-            answer=result.answer,
+            answer=result.answer[:200],
             matched_laws=result.matched_laws,
             ranked_articles=result.final_articles,
         )

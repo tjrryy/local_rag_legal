@@ -57,9 +57,10 @@ REWRITE_PROMPT = """你是法律领域查询改写助手。请把用户的【最
 QA_PROMPT = """你是中国法律领域的智能助手。请严格根据下面【法条参考】回答用户问题。
 
 要求：
-1. 必须先引用法条原文（用「《法律名》第X条」格式），再做解释
-2. 如果多条法条相关，按相关度从高到低引用
-3. 如果【法条参考】中没有任何相关内容，请直接回答："现有法条中未直接规定该问题"
+1. 引用法条时用「《法律名》第X条」格式即可，不要重复法条原文
+2. 直接给出结论和可操作的建议，语言简洁
+3. 如果多条法条相关，按相关度从高到低引用
+4. 如果【法条参考】中没有任何相关内容，请直接回答："现有法条中未直接规定该问题"
 
 【法条参考】
 {context}
@@ -290,16 +291,42 @@ def build_llm(backend: str = "deepseek", model: str = ""):
             用 subprocess 调 curl 跑 Ollama LLM（绕过 sandbox 对 Python HTTP 的限制）。
             遵循 LangChain LLM 协议：invoke() 返回 LLMResult（带 text / ttft_ms / total_ms）。
             """
-            def __init__(self, model: str, base_url: str):
+            def __init__(
+                self,
+                model: str,
+                base_url: str,
+                num_predict: int = 512,
+                options: dict | None = None,
+            ):
                 self.model = model
                 self.base_url = base_url.rstrip("/")
+                self.num_predict = num_predict
+                # 可覆盖的 Ollama generate options；保留保守默认值
+                self.options = {
+                    "temperature": 0.1,
+                    "top_p": 0.9,
+                    "num_predict": self.num_predict,
+                }
+                if options:
+                    self.options.update(options)
 
-            def _post(self, prompt: str, stream_callback=None) -> LLMResult:
+            def warm_up(self, prompt: str = "你好") -> None:
+                """
+                预热模型：触发 Ollama 加载模型到内存/GPU，避免第一次真实请求时 TTFT 过高。
+                预热不打印输出、不抛错（失败仅警告）。
+                """
+                try:
+                    _ = self._post(prompt, silent=True)
+                except Exception as e:
+                    print(f"      [WARN] LLM warm-up failed: {e}")
+
+            def _post(self, prompt: str, stream_callback=None, silent: bool = False) -> LLMResult:
                 payload = json.dumps({
                     "model": self.model,
                     "prompt": prompt,
                     "stream": True,
                     "keep_alive": "30m",
+                    "options": self.options,
                 })
                 last_err = None
                 for attempt in range(3):
@@ -382,10 +409,25 @@ def build_llm(backend: str = "deepseek", model: str = ""):
                     prompt = str(prompt)
                 return self._post(prompt, stream_callback=callback)
 
-        return RobustOllamaLLM(
+        # 允许通过环境变量注入额外 Ollama options，格式为 JSON
+        extra_options = {}
+        ollama_options_env = os.environ.get("OLLAMA_OPTIONS", "")
+        if ollama_options_env:
+            try:
+                extra_options = json.loads(ollama_options_env)
+            except json.JSONDecodeError as e:
+                print(f"      [WARN] OLLAMA_OPTIONS 解析失败（忽略）: {e}")
+
+        llm = RobustOllamaLLM(
             model=model or "qwen2.5:7b",
             base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
+            num_predict=int(os.environ.get("OLLAMA_NUM_PREDICT", "512")),
+            options=extra_options,
         )
+        # 预热模型，避免第一次真实请求 TTFT 过高（可通过 OLLAMA_NO_WARM_UP=1 关闭）
+        if os.environ.get("OLLAMA_NO_WARM_UP") != "1":
+            llm.warm_up()
+        return llm
     raise ValueError(f"unknown llm backend: {backend}")
 
 
@@ -449,14 +491,21 @@ class LawNameMatcher:
     """
     在 303 部法律名里找 top-K。
     用 FAISS 索引（由 build_indexes.py 预先构建）。
+    新增：query vector 缓存，复用 Stage 4 的 query embedding。
     """
 
-    def __init__(self, db: FAISS):
+    def __init__(self, db: FAISS, query_vec_cache: dict[str, list[float]] | None = None):
         self.db = db
+        self._query_vec_cache = query_vec_cache if query_vec_cache is not None else {}
 
     def __call__(self, query: str, top_k: int = 3) -> list[str]:
         q = BGE_QUERY_PREFIX + query
-        results = self.db.similarity_search(q, k=top_k)
+        if q in self._query_vec_cache:
+            # 复用已缓存的 query vector，避免重复调用 embedding
+            q_vec = self._query_vec_cache[q]
+            results = self.db.similarity_search_by_vector(q_vec, k=top_k)
+        else:
+            results = self.db.similarity_search(q, k=top_k)
         return [doc.metadata["law_title"] for doc in results]
 
 
@@ -508,7 +557,7 @@ class ArticleFetcher:
 
         # 关键词 → 法律名 反查表（用于 Stage 2 跳过 FAISS）
         # 把"草原"、"网络安全"、"中医药"等核心实体词映射到对应法律
-        # 用法律名去掉前缀/后缀得到的核心 2~4 字作 key
+        # 用法律名去掉前缀/后缀得到的核心 2~8 字作 key
         self.alias_to_law: dict[str, str] = {}
         for title in self.law_to_articles.keys():
             # 例如"中华人民共和国草原法" → 核心"草原法"
@@ -523,6 +572,24 @@ class ArticleFetcher:
             if 2 <= len(core) <= 8:
                 self.alias_to_law[core] = title
 
+        # 补充常见“主题词”到法律的映射，提升口语化 query 的命中
+        self.topic_to_law: dict[str, str] = {
+            "拖欠工资": "中华人民共和国劳动合同法",
+            "辞退": "中华人民共和国劳动合同法",
+            "被辞退": "中华人民共和国劳动合同法",
+            "解雇": "中华人民共和国劳动合同法",
+            "开除": "中华人民共和国劳动合同法",
+            "赔偿": "中华人民共和国劳动合同法",
+            "经济补偿": "中华人民共和国劳动合同法",
+            "加班费": "中华人民共和国劳动法",
+            "工伤": "中华人民共和国工伤保险条例",
+            "社保": "中华人民共和国社会保险法",
+            "劳动仲裁": "中华人民共和国劳动争议调解仲裁法",
+            "离婚": "中华人民共和国民法典",
+            "合同": "中华人民共和国民法典",
+            "借款": "中华人民共和国民法典",
+        }
+
     def __call__(self, law_titles: Iterable[str]) -> list[Document]:
         out: list[Document] = []
         for t in law_titles:
@@ -533,7 +600,15 @@ class ArticleFetcher:
         """在文本里找法律名关键词，返回对应法律名（去重保序，最多 3 部）"""
         seen: set[str] = set()
         hits: list[str] = []
-        # 长 alias 优先匹配（避免"刑法"先吃掉"刑法修正案"等）
+        # 1) 先匹配口语化主题词（如"拖欠工资"→劳动合同法）
+        for topic, law in sorted(self.topic_to_law.items(), key=lambda x: len(x[0]), reverse=True):
+            if topic in text:
+                if law not in seen:
+                    seen.add(law)
+                    hits.append(law)
+                    if len(hits) >= 3:
+                        return hits
+        # 2) 再匹配法律名核心词（长 alias 优先，避免"刑法"先吃掉"刑法修正案"等）
         for alias in sorted(self.alias_to_law.keys(), key=len, reverse=True):
             if alias in text:
                 law = self.alias_to_law[alias]
@@ -558,12 +633,26 @@ class ArticleRanker:
          - 无 article_db：回退到传入的 candidates
       2) bge-m3 精排：对这 K1 条重新编码 + 点积，取 Top-K
     相对暴力精排（200 候选全重编码）快 ~3-5 倍。
+
+    新增：query vector 缓存，避免同一 query 重复调用 embedding。
     """
 
-    def __init__(self, embeddings, article_db=None, fetch_k: int = 50):
+    def __init__(
+        self,
+        embeddings,
+        article_db=None,
+        fetch_k: int = 50,
+        query_vec_cache: dict[str, list[float]] | None = None,
+    ):
         self.embeddings = embeddings
         self.article_db = article_db
         self.fetch_k = fetch_k
+        self._query_vec_cache = query_vec_cache if query_vec_cache is not None else {}
+
+    def _embed_query_cached(self, q: str) -> list[float]:
+        if q not in self._query_vec_cache:
+            self._query_vec_cache[q] = self.embeddings.embed_query(q)
+        return self._query_vec_cache[q]
 
     def __call__(
         self,
@@ -574,17 +663,30 @@ class ArticleRanker:
     ) -> list[tuple[Document, float]]:
         q = BGE_QUERY_PREFIX + query
 
-        # 1) 粗排
+        # 1) 粗排（默认 fetch_k=30，减少候选 embedding 调用）
         coarse: list[Document] = []
         if self.article_db is not None and law_filter:
             # 强约束：在 Stage 2 命中的法律里搜
-            coarse = self.article_db.similarity_search(
-                q, k=self.fetch_k,
-                filter={"law_title": {"$in": list(law_filter)}},
-            )
+            # 优先复用 query vector，避免二次 embedding
+            if q in self._query_vec_cache:
+                coarse = self.article_db.similarity_search_by_vector(
+                    self._query_vec_cache[q],
+                    k=self.fetch_k,
+                    filter={"law_title": {"$in": list(law_filter)}},
+                )
+            else:
+                coarse = self.article_db.similarity_search(
+                    q, k=self.fetch_k,
+                    filter={"law_title": {"$in": list(law_filter)}},
+                )
         elif self.article_db is not None:
             # 无过滤：全库搜
-            coarse = self.article_db.similarity_search(q, k=self.fetch_k)
+            if q in self._query_vec_cache:
+                coarse = self.article_db.similarity_search_by_vector(
+                    self._query_vec_cache[q], k=self.fetch_k
+                )
+            else:
+                coarse = self.article_db.similarity_search(q, k=self.fetch_k)
         else:
             # 兜底：传入的 candidates
             coarse = candidates or []
@@ -592,11 +694,11 @@ class ArticleRanker:
         if not coarse:
             return []
 
-        # 2) 精排
+        # 2) 精排：候选 doc embedding 可并发调用（部分 embedding backend 支持批量）
+        q_vec = self._embed_query_cached(q)
         cand_vecs = self.embeddings.embed_documents(
             [c.page_content for c in coarse]
         )
-        q_vec = self.embeddings.embed_query(q)
         scores = np.array(np.dot(cand_vecs, q_vec))
         top_idx = np.argsort(-scores)[:top_k]
         return [(coarse[i], float(scores[i])) for i in top_idx]
@@ -607,17 +709,22 @@ class ArticleRanker:
 # ============================================================
 
 class QAAgent:
-    def __init__(self, llm):
+    def __init__(self, llm, max_articles: int = 6):
         self.llm = llm
+        self.max_articles = max_articles
 
     def _format_context(self, articles: list[tuple[Document, float]]) -> str:
         if not articles:
             return "（无相关法条）"
         lines = []
-        for i, (doc, score) in enumerate(articles, 1):
+        # 只取前 max_articles 条，减少 LLM 上下文长度
+        for i, (doc, score) in enumerate(articles[: self.max_articles], 1):
             title = doc.metadata.get("law_title", "")
             artno = doc.metadata.get("article_no", "")
             text = doc.metadata.get("text", "")
+            # 对超长法条做截断，避免 prompt 膨胀
+            if len(text) > 600:
+                text = text[:600].rstrip() + "……"
             lines.append(
                 f"{i}. (相似度={score:.3f}) 《{title}》{artno}\n   {text}"
             )
@@ -684,10 +791,13 @@ class LegalRAGPipeline:
         embed_model: str = "",
         llm_model: str = "",
         enable_hyde: bool = False,
+        top_laws: int = 3,
+        top_articles: int = 10,
     ):
         print("=" * 60)
         print(f"[BOOT] 初始化 5 阶段管道 ...")
         print(f"       embedding: {embed_backend}  |  llm: {llm_backend}")
+        print(f"       top_laws={top_laws}  |  top_articles={top_articles}")
         print("=" * 60)
 
         # Embedding & 2 个 FAISS 索引
@@ -711,11 +821,21 @@ class LegalRAGPipeline:
         # LLM & Agent
         self.llm = build_llm(llm_backend, llm_model)
         self.rewriter = QueryRewriter(self.llm)
-        self.law_matcher = LawNameMatcher(self.law_matcher_db)
+        # LawNameMatcher 与 ArticleRanker 共享 query vector 缓存
+        self._query_vec_cache: dict[str, list[float]] = {}
+        self.law_matcher = LawNameMatcher(self.law_matcher_db, query_vec_cache=self._query_vec_cache)
         self.fetcher = ArticleFetcher(DATA_DIR)
         # ArticleRanker 注入 article_db：FAISS 粗排 + bge-m3 精排
-        self.ranker = ArticleRanker(self.embeddings, article_db=self.article_db, fetch_k=50)
-        self.qa = QAAgent(self.llm)
+        self.ranker = ArticleRanker(
+            self.embeddings,
+            article_db=self.article_db,
+            fetch_k=30,
+            query_vec_cache=self._query_vec_cache,
+        )
+        # QA Agent 默认只取 top-6 法条送入 LLM，减少上下文
+        self.qa = QAAgent(self.llm, max_articles=min(6, top_articles))
+        self.top_laws = top_laws
+        self.top_articles = top_articles
         # HyDE：可选，在 Stage 1 和 Stage 2 之间加一层假设回答增强检索
         self.enable_hyde = enable_hyde
         self.hyde = HyDEGenerator(self.llm) if enable_hyde else None
@@ -734,19 +854,67 @@ class LegalRAGPipeline:
         self,
         query: str,
         history: str = "",
-        top_laws: int = 3,
-        top_articles: int = 10,
+        top_laws: int | None = None,
+        top_articles: int | None = None,
     ) -> PipelineResult:
+        top_laws = top_laws if top_laws is not None else self.top_laws
+        top_articles = top_articles if top_articles is not None else self.top_articles
         timings: dict[str, float] = {}
 
-        # Stage 1: 改写
+        def _match_laws(q: str, top_k: int):
+            """先用关键词匹配，未命中再走 FAISS。"""
+            kw = self._keyword_law_match(q)
+            if kw:
+                print(f"[Stage 2] 用关键词匹配: {kw}")
+                return kw
+            return self.law_matcher(q, top_k=top_k)
+
+        # Stage 1 & 2：改写 + 法律名匹配（关键词优先，避免多余 LLM 调用）
         t0 = time.time()
-        rewritten = self.rewriter(query, history)
-        timings["1_rewrite"] = time.time() - t0
+
+        # 先对原 query 做关键词匹配；如果直接命中，跳过改写
+        kw_matched = self._keyword_law_match(query)
+        if kw_matched:
+            rewritten = query
+            timings["1_rewrite"] = 0.0
+        else:
+            # 未命中关键词：改写 + 法律名匹配并行执行
+            import concurrent.futures
+
+            def _rewrite():
+                return self.rewriter(query, history)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                rewrite_future = executor.submit(_rewrite)
+                match_future = executor.submit(_match_laws, query, top_laws)
+                rewritten = rewrite_future.result()
+                matched = match_future.result()
+
+            timings["1_rewrite"] = time.time() - t0
+            # 若改写后仍含法律关键词，做一次补充匹配并合并
+            original_kw = set(self._keyword_law_match(query))
+            rewritten_kw = set(self._keyword_law_match(rewritten))
+            if rewritten != query and rewritten_kw - original_kw:
+                t1 = time.time()
+                extra = _match_laws(rewritten, top_laws)
+                seen: set[str] = set()
+                merged: list[str] = []
+                for m in matched + extra:
+                    if m and m not in seen:
+                        seen.add(m)
+                        merged.append(m)
+                matched = merged[:top_laws]
+                timings["2_match_laws"] = time.time() - t1
+            else:
+                timings["2_match_laws"] = 0.0
+
+        # 如果原 query 已关键词命中，matched 直接取结果
+        if kw_matched:
+            matched = kw_matched[:top_laws]
+            timings["2_match_laws"] = time.time() - t0
 
         # Stage 1.5: HyDE（可选）
         search_query = rewritten  # 默认用改写后的问题搜
-        hyde_text = ""
         if self.enable_hyde and self.hyde is not None:
             t0 = time.time()
             search_query, hyde_text = self.hyde(rewritten, history)
@@ -754,22 +922,14 @@ class LegalRAGPipeline:
             print(f"[Stage 1.5] HyDE 生成: {hyde_text[:60]}...")
 
         # Stage 1.75: 实体抽取（纯字典，无需 LLM）
-        # 在改写后问题里匹配法律名关键词 → 直接注入 Stage 2，跳过 FAISS
-        t0 = time.time()
-        entity_hint = self.fetcher.keyword_lookup(search_query)
-        timings["1.75_entity"] = time.time() - t0
-        if entity_hint:
-            print(f"[Stage 1.75] 实体命中: {entity_hint}")
-
-        # Stage 2: 法律名匹配
-        t0 = time.time()
-        # 优先级：实体字典 > HyDE法律名 > FAISS
-        if entity_hint:
-            matched = entity_hint
-            print(f"[Stage 2] 用实体命中: {matched}")
-        else:
-            matched = self.law_matcher(search_query, top_k=top_laws)
-        timings["2_match_laws"] = time.time() - t0
+        # 在最终搜索 query 里匹配法律名关键词 → 直接注入 Stage 2，跳过 FAISS
+        if not kw_matched:
+            t0 = time.time()
+            entity_hint = self.fetcher.keyword_lookup(search_query)
+            timings["1.75_entity"] = time.time() - t0
+            if entity_hint:
+                print(f"[Stage 1.75] 实体命中: {entity_hint}")
+                matched = entity_hint
 
         # Stage 3: 取法条
         t0 = time.time()
