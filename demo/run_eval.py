@@ -20,10 +20,11 @@ import re
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 # 兼容 python demo/run_eval.py 调用
 sys.path.insert(0, str(Path(__file__).parent))
-from pipeline import LegalRAGPipeline  # noqa: E402
+from pipeline import LegalRAGPipeline, DATA_DIR  # noqa: E402
 
 
 # ---------------- 工具函数 ----------------
@@ -40,7 +41,7 @@ CN_NUM = {
 }
 
 
-def cn_to_int(s: str) -> int | None:
+def cn_to_int(s: str) -> Optional[int]:
     """把中文数字字符串转成 int，支持 '十''百' 之类。失败返 None。"""
     if not s:
         return None
@@ -170,6 +171,7 @@ def main():
     parser.add_argument("--eval-file", default="demo/eval_set.json")
     parser.add_argument("--no-rewrite", action="store_true")
     parser.add_argument("--hyde", action="store_true", help="启用 HyDE 增强检索")
+    parser.add_argument("--skip-uncovered", action="store_true", help="跳过数据集中不存在的法律和法条号（bad case）")
     args = parser.parse_args()
 
     print(f"[INIT] 评测配置：")
@@ -178,6 +180,7 @@ def main():
     print(f"  评测文件: {args.eval_file}")
     print(f"  评测条数: {args.limit}")
     print(f"  HyDE:   {'启用' if args.hyde else '禁用'}")
+    print(f"  跳过未覆盖: {'是' if args.skip_uncovered else '否'}")
 
     pipeline = LegalRAGPipeline(
         embed_backend=args.embed_backend,
@@ -187,8 +190,63 @@ def main():
         enable_hyde=args.hyde,
     )
 
+    # 加载数据集覆盖信息，用于过滤 bad case
+    law_titles: set[str] = set()
+    law_articles: dict[str, set[int]] = {}
+    article_pat = re.compile(r"^第([一二三四五六七八九十百千零〇0-9]+)条")
+    for fp in sorted(DATA_DIR.glob("laws_dataset_*.json")):
+        for law in json.loads(fp.read_text(encoding="utf-8")):
+            title = (law.get("title") or "").strip()
+            if not title:
+                continue
+            law_titles.add(title)
+            arts: set[int] = set()
+            for art in law.get("articles", []):
+                art = art.strip()
+                if not art:
+                    continue
+                m = article_pat.match(art)
+                if m:
+                    n = cn_to_int(m.group(1))
+                    if n is not None:
+                        arts.add(n)
+            law_articles.setdefault(title, arts)
+
+    def normalize_title(s: str) -> str:
+        for t in law_titles:
+            if s in t or t in s:
+                return t
+        return s
+
     items = json.loads(Path(args.eval_file).read_text(encoding="utf-8"))
     items = items[: args.limit]
+    skipped_ids: list[int] = []
+    if args.skip_uncovered:
+        filtered: list[dict] = []
+        for item in items:
+            rt = item.get("retrieved_text", "")
+            expected_laws = extract_law_names(rt)
+            expected_articles = extract_article_numbers(rt)
+            # 检查法律是否存在
+            matched_title = None
+            for law in expected_laws:
+                matched_title = normalize_title(law)
+                if matched_title in law_titles:
+                    break
+            if expected_laws and matched_title not in law_titles:
+                skipped_ids.append(item["id"])
+                continue
+            # 检查法条号是否存在
+            missing_art = any(
+                art_no not in law_articles.get(matched_title, set())
+                for art_no in expected_articles
+            )
+            if expected_articles and missing_art:
+                skipped_ids.append(item["id"])
+                continue
+            filtered.append(item)
+        items = filtered
+        print(f"  过滤后条数: {len(items)} (跳过 bad case: {len(skipped_ids)})")
 
     # 累计指标
     n_law_hit, n_law_expected = 0, 0
@@ -256,6 +314,8 @@ def main():
     print("=" * 60)
     n = len(items)
     print(f"  评测条数       : {n}")
+    if skipped_ids:
+        print(f"  跳过 bad case  : {len(skipped_ids)} 条 (ids: {skipped_ids})")
     print(f"  总耗时         : {total_elapsed:.0f} s")
     print(f"  ─────────────────────────────────────────")
     print(f"  Stage 2 法律名命中率 : {n_law_hit}/{n_law_expected} "

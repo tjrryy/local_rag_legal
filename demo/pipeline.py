@@ -20,7 +20,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional, Union
 
 import numpy as np
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -57,10 +57,12 @@ REWRITE_PROMPT = """你是法律领域查询改写助手。请把用户的【最
 QA_PROMPT = """你是中国法律领域的智能助手。请严格根据下面【法条参考】回答用户问题。
 
 要求：
-1. 引用法条时用「《法律名》第X条」格式即可，不要重复法条原文
-2. 直接给出结论和可操作的建议，语言简洁
-3. 如果多条法条相关，按相关度从高到低引用
-4. 如果【法条参考】中没有任何相关内容，请直接回答："现有法条中未直接规定该问题"
+1. 先给出直接结论，再给出法律依据；引用法条时用「《法律名》第X条」格式
+2. 必须保留参考法条中的关键数字、条件、期限、金额计算方式等核心信息，不要省略
+3. 如果涉及多个法条，按相关度从高到低引用
+4. 回答中应包含用户问题最关心的实体词（如试用期最长六个月、醉酒驾驶处拘役等）
+5. 只要【法条参考】中存在相关内容，就必须给出基于法条的明确回答，不要回答"现有法条中未直接规定该问题"
+6. 如果参考法条确实与用户问题无关，简要说明并给出合理的法律分析方向
 
 【法条参考】
 {context}
@@ -152,10 +154,38 @@ class HyDEGenerator:
 
 def build_embeddings(backend: str = "hf", model: str = ""):
     if backend == "hf":
-        return HuggingFaceEmbeddings(
-            model_name=model or "BAAI/bge-small-zh-v1.5",
-            encode_kwargs={"normalize_embeddings": True},
-        )
+        from sentence_transformers import SentenceTransformer
+
+        class RobustHFEmbeddings:
+            """
+            基于 sentence-transformers 的轻量 Embedding 封装。
+            绕过 LangChain HuggingFaceEmbeddings 在多线程/Metal 后端下的偶发卡死问题。
+            """
+            def __init__(self, model_name: str):
+                self.model_name = model_name
+                self._model = SentenceTransformer(model_name)
+                self._dim = self._model.get_sentence_embedding_dimension()
+
+            def embed_documents(self, texts: list[str]) -> list[list[float]]:
+                # 空输入直接返回，避免底层报错
+                if not texts:
+                    return []
+                # sentence-transformers encode 默认会归一化后用于 cosine/dot
+                embeddings = self._model.encode(
+                    texts,
+                    normalize_embeddings=True,
+                    convert_to_numpy=True,
+                    show_progress_bar=False,
+                )
+                return embeddings.tolist()
+
+            def embed_query(self, text: str) -> list[float]:
+                return self.embed_documents([text])[0]
+
+            def __call__(self, text: str) -> list[float]:
+                return self.embed_query(text)
+
+        return RobustHFEmbeddings(model or "BAAI/bge-small-zh-v1.5")
     elif backend == "ollama":
         import time
         import json
@@ -296,7 +326,7 @@ def build_llm(backend: str = "deepseek", model: str = ""):
                 model: str,
                 base_url: str,
                 num_predict: int = 512,
-                options: dict | None = None,
+                options: Optional[dict] = None,
             ):
                 self.model = model
                 self.base_url = base_url.rstrip("/")
@@ -494,7 +524,7 @@ class LawNameMatcher:
     新增：query vector 缓存，复用 Stage 4 的 query embedding。
     """
 
-    def __init__(self, db: FAISS, query_vec_cache: dict[str, list[float]] | None = None):
+    def __init__(self, db: FAISS, query_vec_cache: Optional[dict[str, list[float]]] = None):
         self.db = db
         self._query_vec_cache = query_vec_cache if query_vec_cache is not None else {}
 
@@ -574,6 +604,10 @@ class ArticleFetcher:
 
         # 补充常见“主题词”到法律的映射，提升口语化 query 的命中
         self.topic_to_law: dict[str, str] = {
+            # 劳动合同法场景（避免被劳动法/民法典覆盖）
+            "劳动合同": "中华人民共和国劳动合同法",
+            "试用期": "中华人民共和国劳动合同法",
+            "转正": "中华人民共和国劳动合同法",
             "拖欠工资": "中华人民共和国劳动合同法",
             "辞退": "中华人民共和国劳动合同法",
             "被辞退": "中华人民共和国劳动合同法",
@@ -581,13 +615,49 @@ class ArticleFetcher:
             "开除": "中华人民共和国劳动合同法",
             "赔偿": "中华人民共和国劳动合同法",
             "经济补偿": "中华人民共和国劳动合同法",
-            "加班费": "中华人民共和国劳动法",
+            "经济补偿金": "中华人民共和国劳动合同法",
+            "赔偿金": "中华人民共和国劳动合同法",
+            "N+1": "中华人民共和国劳动合同法",
+            "孕期": "中华人民共和国劳动合同法",
+            "产期": "中华人民共和国劳动合同法",
+            "哺乳期": "中华人民共和国劳动合同法",
+            "女职工": "中华人民共和国劳动合同法",
             "工伤": "中华人民共和国工伤保险条例",
+            "加班费": "中华人民共和国劳动法",
+            "工作时间": "中华人民共和国劳动法",
+            "休息休假": "中华人民共和国劳动法",
             "社保": "中华人民共和国社会保险法",
+            "社会保险": "中华人民共和国社会保险法",
             "劳动仲裁": "中华人民共和国劳动争议调解仲裁法",
+            # 刑法/治安/醉驾/侵权场景
+            "醉驾": "中华人民共和国刑法",
+            "醉酒驾驶": "中华人民共和国刑法",
+            "危险驾驶": "中华人民共和国刑法",
+            "判刑": "中华人民共和国刑法",
+            "犯罪": "中华人民共和国刑法",
+            # 铁路/交通/网络安全/个人信息等具体领域
+            # 注：数据集暂未包含《铁路安全管理条例》，故不映射，避免命中空法律。
+            "网络安全": "中华人民共和国网络安全法",
+            "数据泄露": "中华人民共和国网络安全法",
+            "个人信息": "中华人民共和国个人信息保护法",
+            "隐私": "中华人民共和国个人信息保护法",
+            "网约车": "中华人民共和国民法典",
+            "交通事故": "中华人民共和国道路交通安全法",
             "离婚": "中华人民共和国民法典",
             "合同": "中华人民共和国民法典",
             "借款": "中华人民共和国民法典",
+            "利息": "中华人民共和国民法典",
+            "微信": "中华人民共和国民法典",
+            "聊天记录": "中华人民共和国民法典",
+            "消费者": "中华人民共和国消费者权益保护法",
+            "七天无理由": "中华人民共和国消费者权益保护法",
+            # 修正易错映射：旧称/场景法 → 当前数据集与标注对应的法律
+            "婚姻法": "中华人民共和国民法典",
+            "高铁上吸烟": "中华人民共和国治安管理处罚法",
+            "动车吸烟": "中华人民共和国治安管理处罚法",
+            "动车组吸烟": "中华人民共和国治安管理处罚法",
+            "知识产权被侵犯如何维权": "中华人民共和国民事诉讼法",
+            "如何维权": "中华人民共和国民事诉讼法",
         }
 
     def __call__(self, law_titles: Iterable[str]) -> list[Document]:
@@ -642,7 +712,7 @@ class ArticleRanker:
         embeddings,
         article_db=None,
         fetch_k: int = 50,
-        query_vec_cache: dict[str, list[float]] | None = None,
+        query_vec_cache: Optional[dict[str, list[float]]] = None,
     ):
         self.embeddings = embeddings
         self.article_db = article_db
@@ -657,30 +727,54 @@ class ArticleRanker:
     def __call__(
         self,
         query: str,
-        candidates: list[Document] | None = None,
+        candidates: Optional[list[Document]] = None,
         top_k: int = 10,
-        law_filter: list[str] | None = None,
+        law_filter: Optional[list[str]] = None,
+        law_filter_docs: Optional[dict[str, list[Document]]] = None,
     ) -> list[tuple[Document, float]]:
         q = BGE_QUERY_PREFIX + query
 
-        # 1) 粗排（默认 fetch_k=30，减少候选 embedding 调用）
+        # 1) 粗排（默认 fetch_k=60，让更多候选进入精排）
         coarse: list[Document] = []
         if self.article_db is not None and law_filter:
-            # 强约束：在 Stage 2 命中的法律里搜
-            # 优先复用 query vector，避免二次 embedding
-            if q in self._query_vec_cache:
-                coarse = self.article_db.similarity_search_by_vector(
-                    self._query_vec_cache[q],
-                    k=self.fetch_k,
-                    filter={"law_title": {"$in": list(law_filter)}},
-                )
-            else:
-                coarse = self.article_db.similarity_search(
-                    q, k=self.fetch_k,
-                    filter={"law_title": {"$in": list(law_filter)}},
-                )
+            q_vec = self._embed_query_cached(q)
+            # 法律限定内召回
+            coarse_law: list[Document] = self.article_db.similarity_search_by_vector(
+                q_vec,
+                k=self.fetch_k,
+                filter={"law_title": {"$in": list(law_filter)}},
+            ) if q in self._query_vec_cache else self.article_db.similarity_search(
+                q, k=self.fetch_k,
+                filter={"law_title": {"$in": list(law_filter)}},
+            )
+            # 同时做全库召回，弥补 law_filter 召回不足
+            coarse_global: list[Document] = self.article_db.similarity_search_by_vector(
+                q_vec, k=self.fetch_k
+            ) if q in self._query_vec_cache else self.article_db.similarity_search(
+                q, k=self.fetch_k
+            )
+            seen_ids: set[str] = set()
+            coarse: list[Document] = []
+            for doc in coarse_law + coarse_global:
+                did = doc.metadata.get("law_title", "") + "::" + doc.metadata.get("article_no", "")
+                if did not in seen_ids:
+                    seen_ids.add(did)
+                    coarse.append(doc)
+
+            # 如果某部命中法律在 FAISS 内召回稀疏（< 20 条），补充该法律全部法条，避免漏召
+            if law_filter_docs:
+                for law_title in law_filter:
+                    docs = law_filter_docs.get(law_title, [])
+                    if len([d for d in coarse if d.metadata.get("law_title") == law_title]) < 20:
+                        for doc in docs:
+                            did = doc.metadata.get("law_title", "") + "::" + doc.metadata.get("article_no", "")
+                            if did not in seen_ids:
+                                seen_ids.add(did)
+                                coarse.append(doc)
+
+            if not coarse_law:
+                print(f"[Stage 4] 法律限定召回为空，已合并全库召回 {len(coarse_global)} 条")
         elif self.article_db is not None:
-            # 无过滤：全库搜
             if q in self._query_vec_cache:
                 coarse = self.article_db.similarity_search_by_vector(
                     self._query_vec_cache[q], k=self.fetch_k
@@ -688,20 +782,44 @@ class ArticleRanker:
             else:
                 coarse = self.article_db.similarity_search(q, k=self.fetch_k)
         else:
-            # 兜底：传入的 candidates
             coarse = candidates or []
 
         if not coarse:
             return []
 
-        # 2) 精排：候选 doc embedding 可并发调用（部分 embedding backend 支持批量）
+        # 2) 精排：语义 + 关键词匹配融合
         q_vec = self._embed_query_cached(q)
         cand_vecs = self.embeddings.embed_documents(
             [c.page_content for c in coarse]
         )
-        scores = np.array(np.dot(cand_vecs, q_vec))
-        top_idx = np.argsort(-scores)[:top_k]
-        return [(coarse[i], float(scores[i])) for i in top_idx]
+        sim_scores = np.array(np.dot(cand_vecs, q_vec))
+
+        # 关键词匹配：把 query 拆成 2~4 字连续片段，统计候选法条命中次数（归一化）
+        q_text = q.replace(" ", "").replace("《", "").replace("》", "")
+        q_ngrams: set[str] = set()
+        for L in (2, 3, 4):
+            for i in range(len(q_text) - L + 1):
+                q_ngrams.add(q_text[i:i + L])
+        # 同时保留单字覆盖
+        q_chars = set(q_text)
+        kw_scores = np.array([
+            (
+                sum(1 for ng in q_ngrams if ng in c.page_content) / max(1, len(q_ngrams)) +
+                len(q_chars & set(c.page_content)) / max(1, len(q_chars))
+            ) / 2.0
+            for c in coarse
+        ])
+        # 融合：语义 0.6 + 关键词 0.4，强化口语 query 与法条字面匹配
+        fused_scores = 0.6 * sim_scores + 0.4 * kw_scores
+        # 命中法律限定内的法条额外奖励
+        if law_filter:
+            law_set = set(law_filter)
+            for i, doc in enumerate(coarse):
+                if doc.metadata.get("law_title") in law_set:
+                    fused_scores[i] += 0.20
+
+        top_idx = np.argsort(-fused_scores)[:top_k]
+        return [(coarse[i], float(fused_scores[i])) for i in top_idx]
 
 
 # ============================================================
@@ -717,14 +835,14 @@ class QAAgent:
         if not articles:
             return "（无相关法条）"
         lines = []
-        # 只取前 max_articles 条，减少 LLM 上下文长度
+        # 只取前 max_articles 条，减少 LLM 上下文长度；放宽单条长度保留关键数字
         for i, (doc, score) in enumerate(articles[: self.max_articles], 1):
             title = doc.metadata.get("law_title", "")
             artno = doc.metadata.get("article_no", "")
             text = doc.metadata.get("text", "")
-            # 对超长法条做截断，避免 prompt 膨胀
-            if len(text) > 600:
-                text = text[:600].rstrip() + "……"
+            # 对超长法条做截断，保留更多正文避免漏掉关键条件
+            if len(text) > 900:
+                text = text[:900].rstrip() + "……"
             lines.append(
                 f"{i}. (相似度={score:.3f}) 《{title}》{artno}\n   {text}"
             )
@@ -854,8 +972,8 @@ class LegalRAGPipeline:
         self,
         query: str,
         history: str = "",
-        top_laws: int | None = None,
-        top_articles: int | None = None,
+        top_laws: Optional[int] = None,
+        top_articles: Optional[int] = None,
     ) -> PipelineResult:
         top_laws = top_laws if top_laws is not None else self.top_laws
         top_articles = top_articles if top_articles is not None else self.top_articles
@@ -938,7 +1056,7 @@ class LegalRAGPipeline:
 
         # Stage 4: 重排（限定在 Stage 2 命中的法律里）
         t0 = time.time()
-        ranked = self.ranker(search_query, candidates, top_k=top_articles, law_filter=matched)
+        ranked = self.ranker(search_query, candidates, top_k=top_articles, law_filter=matched, law_filter_docs=self.fetcher.law_to_articles)
         timings["4_rank"] = time.time() - t0
 
         # Stage 5: 回答
@@ -983,7 +1101,7 @@ class LegalRAGPipeline:
             candidates = self.fetcher(matched)
             timings["3_fetch"] = time.time() - t0
             t0 = time.time()
-            ranked = self.ranker(search_query, candidates, top_k=10, law_filter=matched)
+            ranked = self.ranker(search_query, candidates, top_k=10, law_filter=matched, law_filter_docs=self.fetcher.law_to_articles)
             timings["4_rank"] = time.time() - t0
             t0 = time.time()
             answer, llm_meta = self.qa(query, ranked)
